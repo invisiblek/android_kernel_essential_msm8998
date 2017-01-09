@@ -4252,6 +4252,8 @@ update_cfs_rq_load_avg(u64 now, struct cfs_rq *cfs_rq, bool update_freq)
 	cfs_rq->load_last_update_time_copy = sa->last_update_time;
 #endif
 
+	trace_sched_load_avg_cpu(cpu_of(rq_of(cfs_rq)), cfs_rq);
+
 	if (update_freq && (decayed || removed_util))
 		cfs_rq_util_change(cfs_rq);
 
@@ -4295,7 +4297,6 @@ static inline void update_load_avg(struct sched_entity *se, int flags)
 #endif
 		trace_sched_load_avg_task(task_of(se), &se->avg, ptr);
 	}
-	trace_sched_load_avg_cpu(cpu, cfs_rq);
 }
 
 /**
