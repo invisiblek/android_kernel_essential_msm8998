@@ -1130,6 +1130,14 @@ _modinst_:
 	@mkdir -p $(MODLIB)/kernel
 	$(Q)$(MAKE) -f $(srctree)/scripts/Makefile.modinst
 
+	@ln -s `cd $(srctree) && /bin/pwd` $(MODLIB)/source
+	@if [ ! $(objtree) -ef  $(MODLIB)/build ]; then \
+		rm -f $(MODLIB)/build ; \
+		ln -s $(CURDIR) $(MODLIB)/build ; \
+	fi
+	@cp -f $(objtree)/modules.order $(MODLIB)/
+	@cp -f $(objtree)/modules.builtin $(MODLIB)/
+
 # This depmod is only for convenience to give the initial
 # boot a modules.dep even before / is mounted read-write.  However the
 # boot script depmod is the master version.
