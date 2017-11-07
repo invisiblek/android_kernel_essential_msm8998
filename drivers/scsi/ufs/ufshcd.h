@@ -559,6 +559,9 @@ struct debugfs_files {
 	struct fault_attr fail_attr;
 #endif
 	bool is_sys_suspended;
+#ifdef CONFIG_ESSENTIAL_UFS
+	struct dentry * dump_device_health_desc;
+#endif
 };
 
 /* tag stats statistics types */
@@ -1156,6 +1159,11 @@ out:
 }
 
 int ufshcd_read_device_desc(struct ufs_hba *hba, u8 *buf, u32 size);
+
+#ifdef CONFIG_ESSENTIAL_UFS
+int ufshcd_read_geometry_desc(struct ufs_hba *hba, u8 *buf, u32 size);
+int ufshcd_read_device_health_desc(struct ufs_hba *hba, u8 *buf, u32 size);
+#endif
 
 static inline bool ufshcd_is_hs_mode(struct ufs_pa_layer_attr *pwr_info)
 {

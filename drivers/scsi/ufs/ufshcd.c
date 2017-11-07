@@ -246,7 +246,11 @@ static u32 ufs_query_desc_max_size[] = {
 	QUERY_DESC_RFU_MAX_SIZE,
 	QUERY_DESC_GEOMETRY_MAZ_SIZE,
 	QUERY_DESC_POWER_MAX_SIZE,
+#ifdef CONFIG_ESSENTIAL_UFS
+	QUERY_DESC_DEVICE_HEALTH_MAX_SIZE,
+#else
 	QUERY_DESC_RFU_MAX_SIZE,
+#endif
 };
 
 enum {
@@ -3759,6 +3763,18 @@ int ufshcd_read_device_desc(struct ufs_hba *hba, u8 *buf, u32 size)
 {
 	return ufshcd_read_desc(hba, QUERY_DESC_IDN_DEVICE, 0, buf, size);
 }
+
+#ifdef CONFIG_ESSENTIAL_UFS
+int ufshcd_read_geometry_desc(struct ufs_hba *hba, u8 *buf, u32 size)
+{
+	return ufshcd_read_desc(hba, QUERY_DESC_IDN_GEOMETRY, 0, buf, size);
+}
+
+int ufshcd_read_device_health_desc(struct ufs_hba *hba, u8 *buf, u32 size)
+{
+	return ufshcd_read_desc(hba, QUERY_DESC_IDN_RFU_2, 0, buf, size);
+}
+#endif
 
 /**
  * ufshcd_read_string_desc - read string descriptor
