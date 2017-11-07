@@ -325,6 +325,7 @@ static int snd_usb_create_streams(struct snd_usb_audio *chip, int ctrlif)
 		}
 
 		h1 = control_header;
+
 		if (!h1->bInCollection) {
 			dev_info(&dev->dev, "skipping empty audio interface (v1)\n");
 			return -EINVAL;
