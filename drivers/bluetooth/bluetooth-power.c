@@ -1,4 +1,4 @@
-/* Copyright (c) 2009-2010, 2013-2016 The Linux Foundation. All rights reserved.
+/* Copyright (c) 2009-2010, 2013-2017 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -548,17 +548,15 @@ static int bt_power_populate_dt_pinfo(struct platform_device *pdev)
 
 	BT_PWR_DBG("");
 
-	if (!bt_power_pdata) {
+	if (!bt_power_pdata)
 		return -ENOMEM;
-	}
 
 	if (pdev->dev.of_node) {
 		bt_power_pdata->bt_gpio_sys_rst =
 			of_get_named_gpio(pdev->dev.of_node,
 						"qca,bt-reset-gpio", 0);
-		if (bt_power_pdata->bt_gpio_sys_rst < 0) {
+		if (bt_power_pdata->bt_gpio_sys_rst < 0)
 			BT_PWR_ERR("bt-reset-gpio not provided in device tree");
-		}
 
 		rc = bt_dt_parse_vreg_info(&pdev->dev,
 					&bt_power_pdata->bt_vdd_core,
@@ -684,7 +682,7 @@ int bt_register_slimdev(struct device *dev)
 
 static long bt_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
-	int ret, pwr_cntrl = 0;
+	int ret = 0, pwr_cntrl = 0;
 
 	switch (cmd) {
 	case BT_CMD_SLIM_TEST:
@@ -706,6 +704,7 @@ static long bt_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		} else {
 			BT_PWR_ERR("BT chip state is already :%d no change d\n"
 				, pwr_state);
+			ret = 0;
 		}
 		break;
 	default:

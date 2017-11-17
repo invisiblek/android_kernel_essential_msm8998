@@ -198,16 +198,12 @@ int uvc_status_init(struct uvc_device *dev)
 	return 0;
 }
 
-void uvc_status_unregister(struct uvc_device *dev)
-{
-	usb_kill_urb(dev->int_urb);
-	uvc_input_cleanup(dev);
-}
-
 void uvc_status_cleanup(struct uvc_device *dev)
 {
+	usb_kill_urb(dev->int_urb);
 	usb_free_urb(dev->int_urb);
 	kfree(dev->status);
+	uvc_input_cleanup(dev);
 }
 
 int uvc_status_start(struct uvc_device *dev, gfp_t flags)

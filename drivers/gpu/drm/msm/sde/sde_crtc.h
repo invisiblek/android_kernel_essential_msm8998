@@ -82,6 +82,7 @@ struct sde_crtc_frame_event {
  * @vblank_cb_count : count of vblank callback since last reset
  * @vblank_cb_time  : ktime at vblank count reset
  * @vblank_refcount : reference count for vblank enable request
+ * @suspend         : whether or not a suspend operation is in progress
  * @feature_list  : list of color processing features supported on a crtc
  * @active_list   : list of color processing features are active
  * @dirty_list    : list of color processing features are dirty
@@ -89,6 +90,7 @@ struct sde_crtc_frame_event {
  * @frame_pending : Whether or not an update is pending
  * @frame_events  : static allocation of in-flight frame events
  * @frame_event_list : available frame event list
+ * @pending       : Whether any page-flip events are pending signal
  * @spin_lock     : spin lock for frame event, transaction status, etc...
  */
 struct sde_crtc {
@@ -109,13 +111,14 @@ struct sde_crtc {
 
 	/* output fence support */
 	struct sde_fence output_fence;
-
+	atomic_t pending;
 	struct sde_hw_stage_cfg stage_cfg;
 	struct dentry *debugfs_root;
 
 	u32 vblank_cb_count;
 	ktime_t vblank_cb_time;
 	atomic_t vblank_refcount;
+	bool suspend;
 
 	struct list_head feature_list;
 	struct list_head active_list;
@@ -245,16 +248,10 @@ void sde_crtc_cancel_pending_flip(struct drm_crtc *crtc, struct drm_file *file);
 bool sde_crtc_is_rt(struct drm_crtc *crtc);
 
 /**
- * sde_crtc_get_intf_mode - get interface mode of the given crtc
+ * sde_crtc_get_intf_mode - get primary interface mode of the given crtc
  * @crtc: Pointert to crtc
  */
-static inline enum sde_intf_mode sde_crtc_get_intf_mode(struct drm_crtc *crtc)
-{
-	struct sde_crtc_state *cstate =
-			crtc ? to_sde_crtc_state(crtc->state) : NULL;
-
-	return cstate ? cstate->intf_mode : INTF_MODE_NONE;
-}
+enum sde_intf_mode sde_crtc_get_intf_mode(struct drm_crtc *crtc);
 
 /**
  * sde_core_perf_crtc_is_wb - check if writeback is primary output of this crtc

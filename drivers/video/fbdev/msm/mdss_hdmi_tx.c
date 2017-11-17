@@ -66,7 +66,7 @@
 #define HDMI_TX_4_MAX_PCLK_RATE            600000
 
 #define hdmi_tx_get_fd(x) ((x && (ffs(x) > 0))  ? \
-			hdmi_ctrl->feature_data[ffs(x) - 1] : 0)
+			hdmi_ctrl->feature_data[ffs(x) - 1] : NULL)
 #define hdmi_tx_set_fd(x, y) {if (x && (ffs(x) > 0)) \
 			hdmi_ctrl->feature_data[ffs(x) - 1] = y; }
 
@@ -272,20 +272,6 @@ static void hdmi_tx_cable_notify_work(struct work_struct *work)
 	mutex_unlock(&hdmi_ctrl->tx_lock);
 } /* hdmi_tx_cable_notify_work */
 
-static bool hdmi_tx_is_cea_format(int mode)
-{
-	bool cea_fmt;
-
-	if ((mode > 0) && (mode <= HDMI_EVFRMT_END))
-		cea_fmt = true;
-	else
-		cea_fmt = false;
-
-	DEV_DBG("%s: %s\n", __func__, cea_fmt ? "Yes" : "No");
-
-	return cea_fmt;
-}
-
 static inline bool hdmi_tx_is_hdcp_enabled(struct hdmi_tx_ctrl *hdmi_ctrl)
 {
 	return hdmi_ctrl->hdcp_feature_on &&
@@ -375,11 +361,11 @@ static void hdmi_tx_audio_setup(struct hdmi_tx_ctrl *hdmi_ctrl)
 	}
 }
 
-static inline bool hdmi_tx_is_dvi_mode(struct hdmi_tx_ctrl *hdmi_ctrl)
+static inline u32 hdmi_tx_is_dvi_mode(struct hdmi_tx_ctrl *hdmi_ctrl)
 {
-	return (hdmi_edid_get_sink_mode(
-		hdmi_tx_get_fd(HDMI_TX_FEAT_EDID),
-		hdmi_ctrl->vic) == SINK_MODE_DVI);
+	void *data = hdmi_tx_get_fd(HDMI_TX_FEAT_EDID);
+
+	return hdmi_edid_is_dvi_mode(data);
 } /* hdmi_tx_is_dvi_mode */
 
 static inline u32 hdmi_tx_is_in_splash(struct hdmi_tx_ctrl *hdmi_ctrl)
@@ -1575,12 +1561,14 @@ static void hdmi_tx_hdcp_cb_work(struct work_struct *work)
 			rc = hdmi_tx_config_avmute(hdmi_ctrl, false);
 		}
 
-		if (hdmi_ctrl->hdcp1_use_sw_keys && hdmi_ctrl->hdcp14_present)
-			hdcp1_set_enc(true);
+		if (hdmi_ctrl->hdcp1_use_sw_keys && hdmi_ctrl->hdcp14_present) {
+			if (!hdmi_ctrl->hdcp22_present)
+				hdcp1_set_enc(true);
+		}
 		break;
 	case HDCP_STATE_AUTH_FAIL:
 		if (hdmi_ctrl->hdcp1_use_sw_keys && hdmi_ctrl->hdcp14_present) {
-			if (hdmi_ctrl->auth_state)
+			if (hdmi_ctrl->auth_state && !hdmi_ctrl->hdcp22_present)
 				hdcp1_set_enc(false);
 		}
 
@@ -2452,6 +2440,7 @@ static void hdmi_tx_set_mode(struct hdmi_tx_ctrl *hdmi_ctrl, u32 power_on)
 	struct dss_io_data *io = NULL;
 	/* Defaults: Disable block, HDMI mode */
 	u32 hdmi_ctrl_reg = BIT(1);
+	void *data = hdmi_tx_get_fd(HDMI_TX_FEAT_EDID);
 
 	if (!hdmi_ctrl) {
 		DEV_ERR("%s: invalid input\n", __func__);
@@ -2480,8 +2469,7 @@ static void hdmi_tx_set_mode(struct hdmi_tx_ctrl *hdmi_ctrl, u32 power_on)
 			hdmi_ctrl_reg |= BIT(2);
 
 		/* Set transmission mode to DVI based in EDID info */
-		if (hdmi_edid_get_sink_mode(hdmi_tx_get_fd(HDMI_TX_FEAT_EDID),
-			hdmi_ctrl->vic) == SINK_MODE_DVI)
+		if (hdmi_edid_is_dvi_mode(data))
 			hdmi_ctrl_reg &= ~BIT(1); /* DVI mode */
 
 		/*
@@ -2940,6 +2928,7 @@ static int hdmi_tx_audio_info_setup(struct platform_device *pdev,
 {
 	int rc = 0;
 	struct hdmi_tx_ctrl *hdmi_ctrl = platform_get_drvdata(pdev);
+	u32 is_mode_dvi;
 
 	if (!hdmi_ctrl || !params) {
 		DEV_ERR("%s: invalid input\n", __func__);
@@ -2948,8 +2937,9 @@ static int hdmi_tx_audio_info_setup(struct platform_device *pdev,
 
 	mutex_lock(&hdmi_ctrl->tx_lock);
 
-	if (!hdmi_tx_is_dvi_mode(hdmi_ctrl) &&
-		hdmi_tx_is_panel_on(hdmi_ctrl)) {
+	is_mode_dvi = hdmi_tx_is_dvi_mode(hdmi_ctrl);
+
+	if (!is_mode_dvi && hdmi_tx_is_panel_on(hdmi_ctrl)) {
 		memcpy(&hdmi_ctrl->audio_params, params,
 			sizeof(struct msm_ext_disp_audio_setup_params));
 
@@ -3190,9 +3180,7 @@ static int hdmi_tx_power_on(struct hdmi_tx_ctrl *hdmi_ctrl)
 	}
 
 	hdmi_ctrl->panel.vic = hdmi_ctrl->vic;
-
-	if (!hdmi_tx_is_dvi_mode(hdmi_ctrl) &&
-	    hdmi_tx_is_cea_format(hdmi_ctrl->vic))
+	if (!hdmi_tx_is_dvi_mode(hdmi_ctrl))
 		hdmi_ctrl->panel.infoframe = true;
 	else
 		hdmi_ctrl->panel.infoframe = false;
@@ -3220,8 +3208,7 @@ static int hdmi_tx_power_on(struct hdmi_tx_ctrl *hdmi_ctrl)
 
 	hdmi_tx_core_on(hdmi_ctrl);
 
-	if (hdmi_ctrl->panel.infoframe &&
-	    !hdmi_tx_is_encryption_set(hdmi_ctrl) &&
+	if (!hdmi_tx_is_encryption_set(hdmi_ctrl) &&
 	    hdmi_tx_is_stream_shareable(hdmi_ctrl)) {
 		hdmi_tx_config_avmute(hdmi_ctrl, false);
 	}
@@ -3329,7 +3316,7 @@ static int hdmi_tx_hpd_on(struct hdmi_tx_ctrl *hdmi_ctrl)
 
 		hdmi_ctrl->hpd_initialized = true;
 
-		DEV_DBG("%s: HDMI HW version = 0x%x\n", __func__,
+		DEV_INFO("%s: HDMI HW version = 0x%x\n", __func__,
 			DSS_REG_R_ND(&hdmi_ctrl->pdata.io[HDMI_TX_CORE_IO],
 				HDMI_VERSION));
 

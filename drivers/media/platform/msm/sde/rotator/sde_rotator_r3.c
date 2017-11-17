@@ -814,6 +814,9 @@ static void sde_hw_rotator_setup_wbengine(struct sde_hw_rotator_context *ctx,
 		bw /= TRAFFIC_SHAPE_CLKTICK_12MS;
 		if (bw > 0xFF)
 			bw = 0xFF;
+		else if (bw == 0)
+			bw = 1;
+
 		SDE_REGDMA_WRITE(wrptr, ROT_WB_TRAFFIC_SHAPER_WR_CLIENT,
 				BIT(31) | bw);
 		SDEROT_DBG("Enable ROT_WB Traffic Shaper:%d\n", bw);
@@ -1785,6 +1788,10 @@ static int sde_hw_rotator_config(struct sde_rot_hw_resource *hw,
 	wb_cfg.fps = entry->perf->config.frame_rate;
 	wb_cfg.bw = entry->perf->bw;
 	wb_cfg.fmt = sde_get_format_params(item->output.format);
+	if (!wb_cfg.fmt) {
+		SDEROT_ERR("Output format is NULL\n");
+		return -EINVAL;
+	}
 	wb_cfg.dst_rect = &item->dst_rect;
 	wb_cfg.data = &entry->dst_buf;
 	sde_mdp_get_plane_sizes(wb_cfg.fmt, item->output.width,

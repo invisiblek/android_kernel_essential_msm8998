@@ -359,7 +359,7 @@ static int32_t msm_actuator_init_focus(struct msm_actuator_ctrl_t *a_ctrl,
 	int32_t rc = -EFAULT;
 	int32_t i = 0;
 	enum msm_camera_i2c_reg_addr_type save_addr_type;
-	CDBG("Enter [Cam%d]\n", a_ctrl->cam_name);
+	CDBG("Enter\n");
 
 	save_addr_type = a_ctrl->i2c_client.addr_type;
 	for (i = 0; i < size; i++) {
@@ -573,7 +573,10 @@ static int32_t msm_actuator_move_focus(
 
 	CDBG("called, dir %d, num_steps %d\n", dir, num_steps);
 
-	if (dest_step_pos == a_ctrl->curr_step_pos)
+	if ((dest_step_pos == a_ctrl->curr_step_pos) ||
+		((dest_step_pos <= a_ctrl->total_steps) &&
+		(a_ctrl->step_position_table[dest_step_pos] ==
+		a_ctrl->step_position_table[a_ctrl->curr_step_pos])))
 		return rc;
 
 	if ((sign_dir > MSM_ACTUATOR_MOVE_SIGNED_NEAR) ||

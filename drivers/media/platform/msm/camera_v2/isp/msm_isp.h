@@ -456,7 +456,7 @@ struct msm_vfe_axi_stream {
 	uint32_t runtime_output_format;
 	enum msm_stream_rdi_input_type  rdi_input_type;
 	struct msm_isp_sw_framskip sw_skip;
-	uint8_t sw_ping_pong_bit;
+	int8_t sw_ping_pong_bit;
 
 	struct vfe_device *vfe_dev[MAX_VFE];
 	int num_isp;
@@ -469,6 +469,7 @@ struct msm_vfe_axi_stream {
 	 */
 	uint32_t vfe_mask;
 	uint32_t composite_irq[MSM_ISP_COMP_IRQ_MAX];
+	int lpm_mode;
 };
 
 struct msm_vfe_axi_composite_info {
@@ -785,6 +786,7 @@ struct vfe_device {
 	size_t num_norm_clk;
 	bool hvx_clk_state;
 	enum cam_ahb_clk_vote ahb_vote;
+	enum cam_ahb_clk_vote user_requested_ahb_vote;
 	struct cx_ipeak_client *vfe_cx_ipeak;
 
 	/* Sync variables*/
@@ -794,6 +796,7 @@ struct vfe_device {
 	struct mutex core_mutex;
 	spinlock_t shared_data_lock;
 	spinlock_t reg_update_lock;
+	spinlock_t completion_lock;
 
 	/* Tasklet info */
 	atomic_t irq_cnt;

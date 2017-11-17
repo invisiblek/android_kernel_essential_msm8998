@@ -41,8 +41,8 @@
 	vccq2-supply = <&pm660_l8>;
 	vcc-max-microamp = <500000>;
 	vccq2-max-microamp = <600000>;
-	vddp-ref-clk-supply = <&pm660_l1>;
-	vddp-ref-clk-max-microamp = <100>;
+	qcom,vddp-ref-clk-supply = <&pm660_l1>;
+	qcom,vddp-ref-clk-max-microamp = <100>;
 
 	status = "ok";
 };
@@ -170,6 +170,10 @@
 	qcom,panel-supply-entries = <&dsi_panel_pwr_supply>;
 };
 
+&dsi_rm67195_amoled_fhd_cmd {
+	qcom,panel-supply-entries = <&dsi_panel_pwr_supply_labibb_amoled>;
+};
+
 &sdhc_1 {
 	/* device core power supply */
 	vdd-supply = <&pm660l_l4>;
@@ -253,8 +257,4 @@
 		qcom,recharge-mv = <100>;
 		qcom,parallel-en-pin-polarity = <1>;
 	};
-};
-
-&pm660_charger {
-	qcom,dc-is-wipower;
 };

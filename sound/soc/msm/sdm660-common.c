@@ -133,7 +133,6 @@ static struct dev_config tdm_tx_cfg[TDM_INTERFACE_MAX][TDM_PORT_MAX] = {
 static struct dev_config ext_disp_rx_cfg[] = {
 	[DP_RX_IDX] =   {SAMPLING_RATE_48KHZ, SNDRV_PCM_FORMAT_S16_LE, 2},
 };
-
 static struct dev_config usb_rx_cfg = {
 	.sample_rate = SAMPLING_RATE_48KHZ,
 	.bit_format = SNDRV_PCM_FORMAT_S16_LE,

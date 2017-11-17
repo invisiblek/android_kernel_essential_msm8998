@@ -432,22 +432,6 @@ static int uvc_parse_format(struct uvc_device *dev,
 		ftype = UVC_VS_FRAME_MJPEG;
 		break;
 
-	case UVC_VS_FORMAT_H264:
-		if (buflen < 11) {
-			uvc_trace(UVC_TRACE_DESCR, "device %d videostreaming "
-			       "interface %d FORMAT error\n",
-			       dev->udev->devnum,
-			       alts->desc.bInterfaceNumber);
-			return -EINVAL;
-		}
-
-		strlcpy(format->name, "H.264", sizeof format->name);
-		format->fcc = V4L2_PIX_FMT_H264;
-		format->flags = UVC_FMT_FLAG_COMPRESSED;
-		format->bpp = 0;
-		ftype = UVC_VS_FRAME_H264;
-		break;
-
 	case UVC_VS_FORMAT_DV:
 		if (buflen < 9) {
 			uvc_trace(UVC_TRACE_DESCR, "device %d videostreaming "
@@ -515,11 +499,9 @@ static int uvc_parse_format(struct uvc_device *dev,
 	while (buflen > 2 && buffer[1] == USB_DT_CS_INTERFACE &&
 	       buffer[2] == ftype) {
 		frame = &format->frame[format->nframes];
-		if (ftype == UVC_VS_FRAME_H264)			// H.264
-			n = buflen > 43 ? buffer[43] : 0;
-		else if (ftype != UVC_VS_FRAME_FRAME_BASED)	// MJPEG
+		if (ftype != UVC_VS_FRAME_FRAME_BASED)
 			n = buflen > 25 ? buffer[25] : 0;
-		else						// FRAME
+		else
 			n = buflen > 21 ? buffer[21] : 0;
 
 		n = n ? n : 3;
@@ -532,28 +514,13 @@ static int uvc_parse_format(struct uvc_device *dev,
 		}
 
 		frame->bFrameIndex = buffer[3];
-		if (ftype == UVC_VS_FRAME_H264) {
-			frame->bmCapabilities = buffer[21];
-			frame->wWidth = get_unaligned_le16(&buffer[4])
-				      * width_multiplier;
-			frame->wHeight = get_unaligned_le16(&buffer[6]);
-			frame->dwMinBitRate = get_unaligned_le32(&buffer[31]);
-			frame->dwMaxBitRate = get_unaligned_le32(&buffer[35]);
-		} else {
-			frame->bmCapabilities = buffer[4];
-			frame->wWidth = get_unaligned_le16(&buffer[5])
-				      * width_multiplier;
-			frame->wHeight = get_unaligned_le16(&buffer[7]);
-			frame->dwMinBitRate = get_unaligned_le32(&buffer[9]);
-			frame->dwMaxBitRate = get_unaligned_le32(&buffer[13]);
-		}
-
-		if (ftype == UVC_VS_FRAME_H264) {
-			frame->dwMaxVideoFrameBufferSize = 0;
-			frame->dwDefaultFrameInterval =
-				get_unaligned_le32(&buffer[39]);
-			frame->bFrameIntervalType = buffer[43];
-		} else if (ftype != UVC_VS_FRAME_FRAME_BASED) {
+		frame->bmCapabilities = buffer[4];
+		frame->wWidth = get_unaligned_le16(&buffer[5])
+			      * width_multiplier;
+		frame->wHeight = get_unaligned_le16(&buffer[7]);
+		frame->dwMinBitRate = get_unaligned_le32(&buffer[9]);
+		frame->dwMaxBitRate = get_unaligned_le32(&buffer[13]);
+		if (ftype != UVC_VS_FRAME_FRAME_BASED) {
 			frame->dwMaxVideoFrameBufferSize =
 				get_unaligned_le32(&buffer[17]);
 			frame->dwDefaultFrameInterval =
@@ -585,10 +552,7 @@ static int uvc_parse_format(struct uvc_device *dev,
 		 * some other divisions by zero that could happen.
 		 */
 		for (i = 0; i < n; ++i) {
-			if (ftype == UVC_VS_FRAME_H264)
-				interval = get_unaligned_le32(&buffer[44+4*i]);
-			else
-				interval = get_unaligned_le32(&buffer[26+4*i]);
+			interval = get_unaligned_le32(&buffer[26+4*i]);
 			*(*intervals)++ = interval ? interval : 1;
 		}
 
@@ -776,7 +740,6 @@ static int uvc_parse_streaming(struct uvc_device *dev,
 		switch (_buffer[2]) {
 		case UVC_VS_FORMAT_UNCOMPRESSED:
 		case UVC_VS_FORMAT_MJPEG:
-		case UVC_VS_FORMAT_H264:
 		case UVC_VS_FORMAT_FRAME_BASED:
 			nformats++;
 			break;
@@ -800,7 +763,6 @@ static int uvc_parse_streaming(struct uvc_device *dev,
 
 		case UVC_VS_FRAME_UNCOMPRESSED:
 		case UVC_VS_FRAME_MJPEG:
-		case UVC_VS_FRAME_H264:
 			nframes++;
 			if (_buflen > 25)
 				nintervals += _buffer[25] ? _buffer[25] : 3;
@@ -843,7 +805,6 @@ static int uvc_parse_streaming(struct uvc_device *dev,
 		switch (buffer[2]) {
 		case UVC_VS_FORMAT_UNCOMPRESSED:
 		case UVC_VS_FORMAT_MJPEG:
-		case UVC_VS_FORMAT_H264:
 		case UVC_VS_FORMAT_DV:
 		case UVC_VS_FORMAT_FRAME_BASED:
 			format->frame = frame;
@@ -1634,6 +1595,114 @@ static const char *uvc_print_chain(struct uvc_video_chain *chain)
 	return buffer;
 }
 
+static struct uvc_video_chain *uvc_alloc_chain(struct uvc_device *dev)
+{
+	struct uvc_video_chain *chain;
+
+	chain = kzalloc(sizeof(*chain), GFP_KERNEL);
+	if (chain == NULL)
+		return NULL;
+
+	INIT_LIST_HEAD(&chain->entities);
+	mutex_init(&chain->ctrl_mutex);
+	chain->dev = dev;
+	v4l2_prio_init(&chain->prio);
+
+	return chain;
+}
+
+/*
+ * Fallback heuristic for devices that don't connect units and terminals in a
+ * valid chain.
+ *
+ * Some devices have invalid baSourceID references, causing uvc_scan_chain()
+ * to fail, but if we just take the entities we can find and put them together
+ * in the most sensible chain we can think of, turns out they do work anyway.
+ * Note: This heuristic assumes there is a single chain.
+ *
+ * At the time of writing, devices known to have such a broken chain are
+ *  - Acer Integrated Camera (5986:055a)
+ *  - Realtek rtl157a7 (0bda:57a7)
+ */
+static int uvc_scan_fallback(struct uvc_device *dev)
+{
+	struct uvc_video_chain *chain;
+	struct uvc_entity *iterm = NULL;
+	struct uvc_entity *oterm = NULL;
+	struct uvc_entity *entity;
+	struct uvc_entity *prev;
+
+	/*
+	 * Start by locating the input and output terminals. We only support
+	 * devices with exactly one of each for now.
+	 */
+	list_for_each_entry(entity, &dev->entities, list) {
+		if (UVC_ENTITY_IS_ITERM(entity)) {
+			if (iterm)
+				return -EINVAL;
+			iterm = entity;
+		}
+
+		if (UVC_ENTITY_IS_OTERM(entity)) {
+			if (oterm)
+				return -EINVAL;
+			oterm = entity;
+		}
+	}
+
+	if (iterm == NULL || oterm == NULL)
+		return -EINVAL;
+
+	/* Allocate the chain and fill it. */
+	chain = uvc_alloc_chain(dev);
+	if (chain == NULL)
+		return -ENOMEM;
+
+	if (uvc_scan_chain_entity(chain, oterm) < 0)
+		goto error;
+
+	prev = oterm;
+
+	/*
+	 * Add all Processing and Extension Units with two pads. The order
+	 * doesn't matter much, use reverse list traversal to connect units in
+	 * UVC descriptor order as we build the chain from output to input. This
+	 * leads to units appearing in the order meant by the manufacturer for
+	 * the cameras known to require this heuristic.
+	 */
+	list_for_each_entry_reverse(entity, &dev->entities, list) {
+		if (entity->type != UVC_VC_PROCESSING_UNIT &&
+		    entity->type != UVC_VC_EXTENSION_UNIT)
+			continue;
+
+		if (entity->num_pads != 2)
+			continue;
+
+		if (uvc_scan_chain_entity(chain, entity) < 0)
+			goto error;
+
+		prev->baSourceID[0] = entity->id;
+		prev = entity;
+	}
+
+	if (uvc_scan_chain_entity(chain, iterm) < 0)
+		goto error;
+
+	prev->baSourceID[0] = iterm->id;
+
+	list_add_tail(&chain->list, &dev->chains);
+
+	uvc_trace(UVC_TRACE_PROBE,
+		  "Found a video chain by fallback heuristic (%s).\n",
+		  uvc_print_chain(chain));
+
+	return 0;
+
+error:
+	kfree(chain);
+	return -EINVAL;
+}
+
 /*
  * Scan the device for video chains and register video devices.
  *
@@ -1656,14 +1725,9 @@ static int uvc_scan_device(struct uvc_device *dev)
 		if (term->chain.next || term->chain.prev)
 			continue;
 
-		chain = kzalloc(sizeof(*chain), GFP_KERNEL);
+		chain = uvc_alloc_chain(dev);
 		if (chain == NULL)
 			return -ENOMEM;
-
-		INIT_LIST_HEAD(&chain->entities);
-		mutex_init(&chain->ctrl_mutex);
-		chain->dev = dev;
-		v4l2_prio_init(&chain->prio);
 
 		term->flags |= UVC_ENTITY_FLAG_DEFAULT;
 
@@ -1677,6 +1741,9 @@ static int uvc_scan_device(struct uvc_device *dev)
 
 		list_add_tail(&chain->list, &dev->chains);
 	}
+
+	if (list_empty(&dev->chains))
+		uvc_scan_fallback(dev);
 
 	if (list_empty(&dev->chains)) {
 		uvc_printk(KERN_INFO, "No valid video chain found.\n");
@@ -1709,6 +1776,13 @@ static void uvc_delete(struct uvc_device *dev)
 
 	usb_put_intf(dev->intf);
 	usb_put_dev(dev->udev);
+
+	if (dev->vdev.dev)
+		v4l2_device_unregister(&dev->vdev);
+#ifdef CONFIG_MEDIA_CONTROLLER
+	if (media_devnode_is_registered(&dev->mdev.devnode))
+		media_device_unregister(&dev->mdev);
+#endif
 
 	list_for_each_safe(p, n, &dev->chains) {
 		struct uvc_video_chain *chain;
@@ -1773,14 +1847,6 @@ static void uvc_unregister_video(struct uvc_device *dev)
 
 		uvc_debugfs_cleanup_stream(stream);
 	}
-
-	uvc_status_unregister(dev);
-	if (dev->vdev.dev)
-		v4l2_device_unregister(&dev->vdev);
-#ifdef CONFIG_MEDIA_CONTROLLER
-	if (media_devnode_is_registered(&dev->mdev.devnode))
-		media_device_unregister(&dev->mdev);
-#endif
 
 	/* Decrement the stream count and call uvc_delete explicitly if there
 	 * are no stream left.
@@ -2603,8 +2669,7 @@ static struct usb_device_id uvc_ids[] = {
 	  .bInterfaceProtocol	= 0,
 	  .driver_info		= UVC_QUIRK_FORCE_Y8 },
 	/* Generic USB Video Class */
-	{ USB_INTERFACE_INFO(USB_CLASS_VIDEO, 1, UVC_PC_PROTOCOL_UNDEFINED) },
-	{ USB_INTERFACE_INFO(USB_CLASS_VIDEO, 1, UVC_PC_PROTOCOL_15) },
+	{ USB_INTERFACE_INFO(USB_CLASS_VIDEO, 1, 0) },
 	{}
 };
 

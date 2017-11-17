@@ -22,7 +22,6 @@
 #include <linux/kthread.h>
 
 #include <linux/msm-bus.h>
-#include <linux/proc_fs.h>
 
 #include "mdss.h"
 #include "mdss_dsi.h"
@@ -1162,6 +1161,8 @@ static int mdss_dsi_read_status(struct mdss_dsi_ctrl_pdata *ctrl)
 
 		rc = mdss_dsi_cmdlist_put(ctrl, &cmdreq);
 		if (rc <= 0) {
+			if (!mdss_dsi_sync_wait_enable(ctrl) ||
+				mdss_dsi_sync_wait_trigger(ctrl))
 			pr_err("%s: get status: fail\n", __func__);
 			return rc;
 		}
@@ -1511,6 +1512,34 @@ static int mdss_dsi_wait4video_eng_busy(struct mdss_dsi_ctrl_pdata *ctrl)
 	return ret;
 }
 
+static void mdss_dsi_wait4active_region(struct mdss_dsi_ctrl_pdata *ctrl)
+{
+	int in_blanking = 0;
+	int retry_count = 0;
+
+	if (ctrl->panel_mode != DSI_VIDEO_MODE)
+		return;
+
+	while (retry_count != MAX_BTA_WAIT_RETRY) {
+		mdss_dsi_wait4video_eng_busy(ctrl);
+		in_blanking = ctrl->mdp_callback->fxn(
+			ctrl->mdp_callback->data,
+			MDP_INTF_CALLBACK_CHECK_LINE_COUNT);
+
+		if (in_blanking) {
+			pr_debug("%s: not in active region\n", __func__);
+			retry_count++;
+		} else
+			break;
+	};
+
+	if (retry_count == MAX_BTA_WAIT_RETRY)
+		MDSS_XLOG_TOUT_HANDLER("mdp", "dsi0_ctrl",
+			"dsi0_phy", "dsi1_ctrl", "dsi1_phy",
+			"vbif", "vbif_nrt", "dbg_bus",
+			"vbif_dbg_bus", "dsi_dbg_bus", "panic");
+}
+
 /**
  * mdss_dsi_bta_status_check() - Check dsi panel status through bta check
  * @ctrl_pdata: pointer to the dsi controller structure
@@ -1526,8 +1555,6 @@ int mdss_dsi_bta_status_check(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 	int ret = 0;
 	unsigned long flag;
 	int ignore_underflow = 0;
-	int retry_count = 0;
-	int in_blanking = 0;
 
 	if (ctrl_pdata == NULL) {
 		pr_err("%s: Invalid input data\n", __func__);
@@ -1553,24 +1580,8 @@ int mdss_dsi_bta_status_check(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 	reinit_completion(&ctrl_pdata->bta_comp);
 	mdss_dsi_enable_irq(ctrl_pdata, DSI_BTA_TERM);
 	spin_unlock_irqrestore(&ctrl_pdata->mdp_lock, flag);
-wait:
-	mdss_dsi_wait4video_eng_busy(ctrl_pdata);
-	if (ctrl_pdata->panel_mode == DSI_VIDEO_MODE) {
-		in_blanking = ctrl_pdata->mdp_callback->fxn(
-			ctrl_pdata->mdp_callback->data,
-			MDP_INTF_CALLBACK_CHECK_LINE_COUNT);
-		/* Try for maximum of 5 attempts */
-		if (in_blanking && (retry_count < MAX_BTA_WAIT_RETRY)) {
-			pr_debug("%s: not in active region\n", __func__);
-			retry_count++;
-			goto wait;
-		}
-	}
-	if (retry_count == MAX_BTA_WAIT_RETRY)
-		MDSS_XLOG_TOUT_HANDLER("mdp", "dsi0_ctrl",
-			"dsi0_phy", "dsi1_ctrl", "dsi1_phy",
-			"vbif", "vbif_nrt", "dbg_bus",
-			"vbif_dbg_bus", "dsi_dbg_bus", "panic");
+
+	mdss_dsi_wait4active_region(ctrl_pdata);
 
 	/* mask out overflow errors */
 	if (ignore_underflow)
@@ -1711,9 +1722,7 @@ static int mdss_dsi_cmd_dma_tpg_tx(struct mdss_dsi_ctrl_pdata *ctrl,
 	ret = wait_for_completion_timeout(&ctrl->dma_comp,
 				msecs_to_jiffies(DMA_TX_TIMEOUT));
 	if (ret == 0)
-	{
 		ret = -ETIMEDOUT;
-	}
 	else
 		ret = tp->len;
 
@@ -1992,7 +2001,7 @@ do_send:
 			goto end;
 		}
 
-		mdss_dsi_wait4video_eng_busy(ctrl);
+		mdss_dsi_wait4active_region(ctrl);
 
 		mdss_dsi_enable_irq(ctrl, DSI_CMD_TERM);
 		if (use_dma_tpg)
@@ -2030,7 +2039,7 @@ skip_max_pkt_size:
 			wmb(); /* make sure the RDBK registers are cleared */
 		}
 
-		mdss_dsi_wait4video_eng_busy(ctrl);	/* video mode only */
+		mdss_dsi_wait4active_region(ctrl);
 		mdss_dsi_enable_irq(ctrl, DSI_CMD_TERM);
 		/* transmit read comamnd to client */
 		if (use_dma_tpg)
@@ -2276,6 +2285,7 @@ static int mdss_dsi_cmd_dma_rx(struct mdss_dsi_ctrl_pdata *ctrl,
 	bool ack_error = false;
 	char reg[16] = {0x0};
 	int repeated_bytes = 0;
+	struct mdss_dsi_ctrl_pdata *mctrl = mdss_dsi_get_other_ctrl(ctrl);
 
 	lp = (u32 *)rp->data;
 	temp = (u32 *)reg;
@@ -2336,7 +2346,11 @@ static int mdss_dsi_cmd_dma_rx(struct mdss_dsi_ctrl_pdata *ctrl,
 	off += ((cnt - 1) * 4);
 
 	for (i = 0; i < cnt; i++) {
-		data = (u32)MIPI_INP((ctrl->ctrl_base) + off);
+		if (mdss_dsi_sync_wait_trigger(ctrl))
+			data = (u32)MIPI_INP((mctrl->ctrl_base) + off);
+		else
+			data = (u32)MIPI_INP((ctrl->ctrl_base) + off);
+
 		/* to network byte order */
 		if (!repeated_bytes)
 			*lp++ = ntohl(data);
@@ -2568,15 +2582,8 @@ void mdss_dsi_cmd_mdp_busy(struct mdss_dsi_ctrl_pdata *ctrl)
 		if (!ctrl->mdp_busy)
 			rc = 1;
 		spin_unlock_irqrestore(&ctrl->mdp_lock, flags);
-		if (!rc) {
-			if (mdss_dsi_mdp_busy_tout_check(ctrl)) {
-				pr_err("%s: timeout error\n", __func__);
-				MDSS_XLOG_TOUT_HANDLER("mdp", "dsi0_ctrl",
-					"dsi0_phy", "dsi1_ctrl", "dsi1_phy",
-					"vbif", "vbif_nrt", "dbg_bus",
-					"vbif_dbg_bus", "dsi_dbg_bus", "panic");
-			}
-		}
+		if (!rc && mdss_dsi_mdp_busy_tout_check(ctrl))
+			pr_err("%s: timeout error\n", __func__);
 	}
 	pr_debug("%s: done pid=%d\n", __func__, current->pid);
 	MDSS_XLOG(ctrl->ndx, ctrl->mdp_busy, current->pid, XLOG_FUNC_EXIT);
@@ -3028,8 +3035,6 @@ bool mdss_dsi_ack_err_status(struct mdss_dsi_ctrl_pdata *ctrl)
 	u32 status;
 	unsigned char *base;
 	bool ret = false;
-	static char page_cnt[32] = {0};
-	static char page_status[32] ={0};
 
 	base = ctrl->ctrl_base;
 
@@ -3053,10 +3058,6 @@ bool mdss_dsi_ack_err_status(struct mdss_dsi_ctrl_pdata *ctrl)
 			return false;
 
 		pr_err("%s: status=%x\n", __func__, status);
-		ctrl->err_cont.dsi_ack_err_cnt++;
-		ctrl->err_cont.dsi_ack_err_status = status;
-		sprintf(page_cnt, "0x%x\n",ctrl->err_cont.dsi_ack_err_cnt);
-		sprintf(page_status, "0x%x\n",ctrl->err_cont.dsi_ack_err_status);
 		ret = true;
 	}
 

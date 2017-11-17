@@ -47,8 +47,6 @@
 #include "wcd_cpe_core.h"
 #include "wcdcal-hwdep.h"
 
-#undef USE_QC_MBHC
-
 #define TASHA_RX_PORT_START_NUMBER  16
 
 #define WCD9335_RATES_MASK (SNDRV_PCM_RATE_8000 | SNDRV_PCM_RATE_16000 |\
@@ -112,7 +110,7 @@
 /* Convert from vout ctl to micbias voltage in mV */
 #define WCD_VOUT_CTL_TO_MICB(v) (1000 + v * 50)
 
-#define TASHA_ZDET_NUM_MEASUREMENTS 150
+#define TASHA_ZDET_NUM_MEASUREMENTS 900
 #define TASHA_MBHC_GET_C1(c)  ((c & 0xC000) >> 14)
 #define TASHA_MBHC_GET_X1(x)  (x & 0x3FFF)
 /* z value compared in milliOhm */
@@ -615,7 +613,6 @@ struct wcd_swr_ctrl_platform_data {
 			  int action);
 };
 
-#ifdef USE_QC_MBHC
 static struct wcd_mbhc_register
 	wcd_mbhc_registers[WCD_MBHC_REG_FUNC_MAX] = {
 	WCD_MBHC_REGISTER("WCD_MBHC_L_DET_EN",
@@ -690,7 +687,6 @@ static struct wcd_mbhc_register
 	WCD_MBHC_REGISTER("WCD_MBHC_MUX_CTL",
 			  WCD9335_MBHC_CTL_2, 0x70, 4, 0),
 };
-#endif
 
 static const struct wcd_mbhc_intr intr_ids = {
 	.mbhc_sw_intr =  WCD9335_IRQ_MBHC_SW_DET,
@@ -2223,6 +2219,32 @@ static void tasha_mbhc_moisture_config(struct wcd_mbhc *mbhc)
 	tasha_mbhc_hph_l_pull_up_control(codec, mbhc->moist_iref);
 }
 
+static void tasha_update_anc_state(struct snd_soc_codec *codec, bool enable,
+				   int anc_num)
+{
+	if (enable)
+		snd_soc_update_bits(codec, WCD9335_CDC_RX1_RX_PATH_CFG0 +
+				(20 * anc_num), 0x10, 0x10);
+	else
+		snd_soc_update_bits(codec, WCD9335_CDC_RX1_RX_PATH_CFG0 +
+				(20 * anc_num), 0x10, 0x00);
+}
+
+static bool tasha_is_anc_on(struct wcd_mbhc *mbhc)
+{
+	bool anc_on = false;
+	u16 ancl, ancr;
+
+	ancl =
+	(snd_soc_read(mbhc->codec, WCD9335_CDC_RX1_RX_PATH_CFG0)) & 0x10;
+	ancr =
+	(snd_soc_read(mbhc->codec, WCD9335_CDC_RX2_RX_PATH_CFG0)) & 0x10;
+
+	anc_on = !!(ancl | ancr);
+
+	return anc_on;
+}
+
 static const struct wcd_mbhc_cb mbhc_cb = {
 	.request_irq = tasha_mbhc_request_irq,
 	.irq_control = tasha_mbhc_irq_control,
@@ -2245,6 +2267,8 @@ static const struct wcd_mbhc_cb mbhc_cb = {
 	.mbhc_gnd_det_ctrl = tasha_mbhc_gnd_det_ctrl,
 	.hph_pull_down_ctrl = tasha_mbhc_hph_pull_down_ctrl,
 	.mbhc_moisture_config = tasha_mbhc_moisture_config,
+	.update_anc_state = tasha_update_anc_state,
+	.is_anc_on = tasha_is_anc_on,
 };
 
 static int tasha_get_anc_slot(struct snd_kcontrol *kcontrol,
@@ -4948,7 +4972,7 @@ static int tasha_codec_enable_spline_src(struct snd_soc_codec *codec,
 					 int src_num,
 					 int event)
 {
-	u16 src_paired_reg;
+	u16 src_paired_reg = 0;
 	struct tasha_priv *tasha;
 	u16 rx_path_cfg_reg = WCD9335_CDC_RX1_RX_PATH_CFG0;
 	u16 rx_path_ctl_reg = WCD9335_CDC_RX1_RX_PATH_CTL;
@@ -5906,8 +5930,6 @@ static int tasha_codec_enable_dec(struct snd_soc_dapm_widget *w,
 					    CF_MIN_3DB_150HZ << 5);
 		/* Enable TX PGA Mute */
 		snd_soc_update_bits(codec, tx_vol_ctl_reg, 0x10, 0x10);
-		/* Enable APC */
-		snd_soc_update_bits(codec, dec_cfg_reg, 0x08, 0x08);
 		break;
 	case SND_SOC_DAPM_POST_PMU:
 		snd_soc_update_bits(codec, hpf_gate_reg, 0x01, 0x00);
@@ -5934,7 +5956,6 @@ static int tasha_codec_enable_dec(struct snd_soc_dapm_widget *w,
 		hpf_cut_off_freq =
 			tasha->tx_hpf_work[decimator].hpf_cut_off_freq;
 		snd_soc_update_bits(codec, tx_vol_ctl_reg, 0x10, 0x10);
-		snd_soc_update_bits(codec, dec_cfg_reg, 0x08, 0x00);
 		if (cancel_delayed_work_sync(
 		    &tasha->tx_hpf_work[decimator].dwork)) {
 			if (hpf_cut_off_freq != CF_MIN_3DB_150HZ) {
@@ -12106,8 +12127,10 @@ static int tasha_dig_core_power_collapse(struct tasha_priv *tasha,
 		goto unlock_mutex;
 
 	if (tasha->power_active_ref < 0) {
-		dev_dbg(tasha->dev, "%s: power_active_ref is negative\n",
+		dev_info(tasha->dev,
+			"%s: power_active_ref is negative, resetting it\n",
 			__func__);
+		tasha->power_active_ref = 0;
 		goto unlock_mutex;
 	}
 
@@ -12383,7 +12406,6 @@ static int tasha_codec_internal_rco_ctrl(struct snd_soc_codec *codec,
 	return ret;
 }
 
-#ifdef USE_QC_MBHC
 /*
  * tasha_mbhc_hs_detect: starts mbhc insertion/removal functionality
  * @codec: handle to snd_soc_codec *
@@ -12410,7 +12432,6 @@ void tasha_mbhc_hs_detect_exit(struct snd_soc_codec *codec)
 	wcd_mbhc_stop(&tasha->mbhc);
 }
 EXPORT_SYMBOL(tasha_mbhc_hs_detect_exit);
-#endif
 
 static int wcd9335_get_micb_vout_ctl_val(u32 micb_mv)
 {
@@ -13492,7 +13513,6 @@ static int tasha_post_reset_cb(struct wcd9xxx *wcd9xxx)
 
 	/* Reset reference counter for voting for max bw */
 	tasha->ref_count = 0;
-#ifdef USE_QC_MBHC
 	/* MBHC Init */
 	wcd_mbhc_deinit(&tasha->mbhc);
 	tasha->mbhc_started = false;
@@ -13505,7 +13525,6 @@ static int tasha_post_reset_cb(struct wcd9xxx *wcd9xxx)
 			__func__);
 	else
 		tasha_mbhc_hs_detect(codec, tasha->mbhc.mbhc_cfg);
-#endif
 
 	tasha_cleanup_irqs(tasha);
 	ret = tasha_setup_irqs(tasha);
@@ -13617,9 +13636,7 @@ static int tasha_codec_probe(struct snd_soc_codec *codec)
 		goto err;
 	}
 	set_bit(WCD9XXX_ANC_CAL, tasha->fw_data->cal_bit);
-#ifdef USE_QC_MBHC
 	set_bit(WCD9XXX_MBHC_CAL, tasha->fw_data->cal_bit);
-#endif
 	set_bit(WCD9XXX_MAD_CAL, tasha->fw_data->cal_bit);
 	set_bit(WCD9XXX_VBAT_CAL, tasha->fw_data->cal_bit);
 
@@ -13630,7 +13647,6 @@ static int tasha_codec_probe(struct snd_soc_codec *codec)
 		goto err_hwdep;
 	}
 
-#ifdef USE_QC_MBHC
 	/* Initialize MBHC module */
 	if (TASHA_IS_2_0(tasha->wcd9xxx)) {
 		wcd_mbhc_registers[WCD_MBHC_FSM_STATUS].reg =
@@ -13643,7 +13659,6 @@ static int tasha_codec_probe(struct snd_soc_codec *codec)
 		pr_err("%s: mbhc initialization failed\n", __func__);
 		goto err_hwdep;
 	}
-#endif
 
 	ptr = devm_kzalloc(codec->dev, (sizeof(tasha_rx_chs) +
 			   sizeof(tasha_tx_chs)), GFP_KERNEL);

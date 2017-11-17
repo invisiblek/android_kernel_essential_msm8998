@@ -1230,7 +1230,8 @@ kgsl_sharedmem_find(struct kgsl_process_private *private, uint64_t gpuaddr)
 	spin_lock(&private->mem_lock);
 	idr_for_each_entry(&private->mem_idr, entry, id) {
 		if (GPUADDR_IN_MEMDESC(gpuaddr, &entry->memdesc)) {
-			ret = kgsl_mem_entry_get(entry);
+			if (!entry->pending_free)
+				ret = kgsl_mem_entry_get(entry);
 			break;
 		}
 	}
@@ -2262,7 +2263,7 @@ static long _gpuobj_map_useraddr(struct kgsl_device *device,
 		struct kgsl_mem_entry *entry,
 		struct kgsl_gpuobj_import *param)
 {
-	struct kgsl_gpuobj_import_useraddr useraddr;
+	struct kgsl_gpuobj_import_useraddr useraddr = {0};
 	int ret;
 
 	param->flags &= KGSL_MEMFLAGS_GPUREADONLY
@@ -3440,6 +3441,7 @@ long kgsl_ioctl_sparse_virt_free(struct kgsl_device_private *dev_priv,
 	return 0;
 }
 
+/* entry->bind_lock must be held by the caller */
 static int _sparse_add_to_bind_tree(struct kgsl_mem_entry *entry,
 		uint64_t v_offset,
 		struct kgsl_memdesc *memdesc,
@@ -3468,10 +3470,16 @@ static int _sparse_add_to_bind_tree(struct kgsl_mem_entry *entry,
 		parent = *node;
 		this = rb_entry(parent, struct sparse_bind_object, node);
 
-		if (new->v_off < this->v_off)
+		if ((new->v_off < this->v_off) &&
+			((new->v_off + new->size) <= this->v_off))
 			node = &parent->rb_left;
-		else if (new->v_off > this->v_off)
+		else if ((new->v_off > this->v_off) &&
+			(new->v_off >= (this->v_off + this->size)))
 			node = &parent->rb_right;
+		else {
+			kfree(new);
+			return -EADDRINUSE;
+		}
 	}
 
 	rb_link_node(&new->node, parent, node);
@@ -3686,8 +3694,11 @@ static int _sparse_bind(struct kgsl_process_private *process,
 		return ret;
 	}
 
+	spin_lock(&virt_entry->bind_lock);
 	ret = _sparse_add_to_bind_tree(virt_entry, v_offset, memdesc,
 			p_offset, size, flags);
+	spin_unlock(&virt_entry->bind_lock);
+
 	if (ret == 0)
 		memdesc->cur_bindings += size / PAGE_SIZE;
 
@@ -4780,6 +4791,7 @@ error_close_mmu:
 error_pwrctrl_close:
 	kgsl_pwrctrl_close(device);
 error:
+	kgsl_device_debugfs_close(device);
 	_unregister_device(device);
 	return status;
 }
@@ -4809,6 +4821,7 @@ void kgsl_device_platform_remove(struct kgsl_device *device)
 
 	kgsl_pwrctrl_close(device);
 
+	kgsl_device_debugfs_close(device);
 	_unregister_device(device);
 }
 EXPORT_SYMBOL(kgsl_device_platform_remove);

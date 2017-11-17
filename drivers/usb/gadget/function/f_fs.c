@@ -1189,7 +1189,7 @@ static ssize_t ffs_epfile_read_iter(struct kiocb *kiocb, struct iov_iter *to)
 		*to = p->data;
 	}
 
-	ffs_log("enter");
+	ffs_log("exit");
 
 	return res;
 }
@@ -2015,6 +2015,12 @@ static int ffs_func_eps_enable(struct ffs_function *func)
 			break;
 		}
 
+		/*
+		 * userspace setting maxburst > 1 results more fifo
+		 * allocation than without maxburst. Change maxburst to 1
+		 * only to allocate fifo size of max packet size.
+		 */
+		ep->ep->maxburst = 1;
 		ret = usb_ep_enable(ep->ep);
 		if (likely(!ret)) {
 			epfile->ep = ep;
@@ -2467,6 +2473,8 @@ static int __ffs_data_do_os_desc(enum ffs_os_desc_type type,
 		if (len < sizeof(*d) || h->interface >= ffs->interfaces_count)
 			return -EINVAL;
 		length = le32_to_cpu(d->dwSize);
+		if (len < length)
+			return -EINVAL;
 		type = le32_to_cpu(d->dwPropertyDataType);
 		if (type < USB_EXT_PROP_UNICODE ||
 		    type > USB_EXT_PROP_UNICODE_MULTI) {
@@ -2475,6 +2483,11 @@ static int __ffs_data_do_os_desc(enum ffs_os_desc_type type,
 			return -EINVAL;
 		}
 		pnl = le16_to_cpu(d->wPropertyNameLength);
+		if (length < 14 + pnl) {
+			pr_vdebug("invalid os descriptor length: %d pnl:%d (descriptor %d)\n",
+				  length, pnl, type);
+			return -EINVAL;
+		}
 		pdl = le32_to_cpu(*(u32 *)((u8 *)data + 10 + pnl));
 		if (length != 14 + pnl + pdl) {
 			pr_vdebug("invalid os descriptor length: %d pnl:%d pdl:%d (descriptor %d)\n",
@@ -2564,6 +2577,9 @@ static int __ffs_data_got_descs(struct ffs_data *ffs,
 		}
 	}
 	if (flags & (1 << i)) {
+		if (len < 4) {
+			goto error;
+		}
 		os_descs_count = get_unaligned_le32(data);
 		data += 4;
 		len -= 4;
@@ -2641,7 +2657,8 @@ static int __ffs_data_got_strings(struct ffs_data *ffs,
 
 	ffs_log("enter: len %zu", len);
 
-	if (unlikely(get_unaligned_le32(data) != FUNCTIONFS_STRINGS_MAGIC ||
+	if (unlikely(len < 16 ||
+		     get_unaligned_le32(data) != FUNCTIONFS_STRINGS_MAGIC ||
 		     get_unaligned_le32(data + 4) != len))
 		goto error;
 	str_count  = get_unaligned_le32(data + 8);
@@ -3373,6 +3390,8 @@ static int ffs_func_set_alt(struct usb_function *f,
 	if (ffs->func) {
 		ffs_func_eps_disable(ffs->func);
 		ffs->func = NULL;
+		/* matching put to allow LPM on disconnect */
+		usb_gadget_autopm_put_async(ffs->gadget);
 	}
 
 	if (ffs->state == FFS_DEACTIVATED) {
@@ -3406,14 +3425,9 @@ static int ffs_func_set_alt(struct usb_function *f,
 
 static void ffs_func_disable(struct usb_function *f)
 {
-	struct ffs_function *func = ffs_func_from_usb(f);
-	struct ffs_data *ffs = func->ffs;
-
 	ffs_log("enter");
 
 	ffs_func_set_alt(f, 0, (unsigned)-1);
-	/* matching put to allow LPM on disconnect */
-	usb_gadget_autopm_put_async(ffs->gadget);
 
 	ffs_log("exit");
 }

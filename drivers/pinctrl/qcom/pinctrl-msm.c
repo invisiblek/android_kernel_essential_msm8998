@@ -602,10 +602,6 @@ static void msm_gpio_irq_unmask(struct irq_data *d)
 
 	spin_lock_irqsave(&pctrl->lock, flags);
 
-	val = readl(pctrl->regs + g->intr_status_reg);
-	val &= ~BIT(g->intr_status_bit);
-	writel(val, pctrl->regs + g->intr_status_reg);
-
 	val = readl(pctrl->regs + g->intr_cfg_reg);
 	val |= BIT(g->intr_enable_bit);
 	writel(val, pctrl->regs + g->intr_cfg_reg);
@@ -766,7 +762,7 @@ static struct irq_chip msm_gpio_irq_chip = {
 	.irq_set_wake   = msm_gpio_irq_set_wake,
 };
 
-bool msm_gpio_irq_handler(struct irq_desc *desc)
+static void msm_gpio_irq_handler(struct irq_desc *desc)
 {
 	struct gpio_chip *gc = irq_desc_get_handler_data(desc);
 	const struct msm_pingroup *g;
@@ -776,7 +772,6 @@ bool msm_gpio_irq_handler(struct irq_desc *desc)
 	int handled = 0;
 	u32 val;
 	int i;
-	bool ret;
 
 	chained_irq_enter(chip, desc);
 
@@ -789,21 +784,16 @@ bool msm_gpio_irq_handler(struct irq_desc *desc)
 		val = readl(pctrl->regs + g->intr_status_reg);
 		if (val & BIT(g->intr_status_bit)) {
 			irq_pin = irq_find_mapping(gc->irqdomain, i);
-			handled += generic_handle_irq(irq_pin);
-			/* The first interrupt for pinctrl is
-			 * 202 (GPIO_0) - Handle 201 manually */
-			if (desc->irq_data.irq == 201)
-				handled++;
+			generic_handle_irq(irq_pin);
+			handled++;
 		}
 	}
-	ret = (handled != 0);
 
 	/* No interrupts were flagged */
 	if (handled == 0)
-		ret = handle_bad_irq(desc);
+		handle_bad_irq(desc);
 
 	chained_irq_exit(chip, desc);
-	return ret;
 }
 
 /*

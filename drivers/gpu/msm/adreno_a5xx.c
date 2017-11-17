@@ -715,6 +715,10 @@ static int _load_gpmu_firmware(struct adreno_device *adreno_dev)
 	if (ret)
 		goto err;
 
+	/* Integer overflow check for cmd_size */
+	if (data[2] > (data[0] - 2))
+		goto err;
+
 	cmds = data + data[2] + 3;
 	cmd_size = data[0] - data[2] - 2;
 
@@ -1302,8 +1306,8 @@ static void _load_regfile(struct adreno_device *adreno_dev)
 {
 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
 	const struct firmware *fw;
-	uint32_t block_size = 0, block_total = 0, fw_size;
-	uint32_t *block;
+	uint64_t block_size = 0, block_total = 0;
+	uint32_t fw_size, *block;
 	int ret = -EINVAL;
 
 	if (!adreno_dev->gpucore->regfw_name)
@@ -1325,7 +1329,8 @@ static void _load_regfile(struct adreno_device *adreno_dev)
 	/* All offset numbers calculated from file description */
 	while (block_total < fw_size) {
 		block_size = block[0];
-		if (block_size >= fw_size || block_size < 2)
+		if (((block_total + block_size) >= fw_size)
+				|| block_size < 5)
 			goto err;
 		if (block[1] != GPMU_SEQUENCE_ID)
 			goto err;
@@ -1340,6 +1345,9 @@ static void _load_regfile(struct adreno_device *adreno_dev)
 				goto err;
 
 			adreno_dev->lm_fw = fw;
+
+			if (block[2] > (block_size - 2))
+				goto err;
 			adreno_dev->lm_sequence = block + block[2] + 3;
 			adreno_dev->lm_size = block_size - block[2] - 2;
 		}
@@ -1352,7 +1360,7 @@ static void _load_regfile(struct adreno_device *adreno_dev)
 err:
 	release_firmware(fw);
 	KGSL_PWR_ERR(device,
-		"Register file failed to load sz=%d bsz=%d header=%d\n",
+		"Register file failed to load sz=%d bsz=%llu header=%d\n",
 		fw_size, block_size, ret);
 	return;
 }
@@ -2068,6 +2076,9 @@ static void a5xx_start(struct adreno_device *adreno_dev)
 		}
 
 	}
+
+	/* Disable All flat shading optimization */
+	kgsl_regrmw(device, A5XX_VPC_DBG_ECO_CNTL, 0, 0x1 << 10);
 
 	/*
 	 * VPC corner case with local memory load kill leads to corrupt
@@ -3069,6 +3080,10 @@ static unsigned int a5xx_register_offsets[ADRENO_REG_REGISTER_MAX] = {
 		ADRENO_REG_DEFINE(ADRENO_REG_RBBM_BLOCK_SW_RESET_CMD2,
 					  A5XX_RBBM_BLOCK_SW_RESET_CMD2),
 	ADRENO_REG_DEFINE(ADRENO_REG_UCHE_INVALIDATE0, A5XX_UCHE_INVALIDATE0),
+	ADRENO_REG_DEFINE(ADRENO_REG_RBBM_PERFCTR_RBBM_0_LO,
+				A5XX_RBBM_PERFCTR_RBBM_0_LO),
+	ADRENO_REG_DEFINE(ADRENO_REG_RBBM_PERFCTR_RBBM_0_HI,
+				A5XX_RBBM_PERFCTR_RBBM_0_HI),
 	ADRENO_REG_DEFINE(ADRENO_REG_RBBM_PERFCTR_LOAD_VALUE_LO,
 				A5XX_RBBM_PERFCTR_LOAD_VALUE_LO),
 	ADRENO_REG_DEFINE(ADRENO_REG_RBBM_PERFCTR_LOAD_VALUE_HI,

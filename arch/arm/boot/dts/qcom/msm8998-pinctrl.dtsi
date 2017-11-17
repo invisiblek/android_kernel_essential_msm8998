@@ -1,4 +1,4 @@
-/* Copyright (c) 2015-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -681,6 +681,62 @@
 			};
 		};
 
+		/* USB C analog configuration */
+		wcd_usbc_analog_en1 {
+			wcd_usbc_analog_en1_idle: wcd_usbc_ana_en1_idle {
+				mux {
+					pins = "gpio59";
+					function = "gpio";
+				};
+				config {
+					pins = "gpio59";
+					drive-strength = <2>;
+					bias-pull-down;
+					output-low;
+				};
+			};
+
+			wcd_usbc_analog_en1_active: wcd_usbc_ana_en1_active {
+				mux {
+					pins = "gpio59";
+					function = "gpio";
+				};
+				config {
+					pins = "gpio59";
+					drive-strength = <2>;
+					bias-disable;
+					output-high;
+				};
+			};
+		};
+
+		wcd_usbc_analog_en2n {
+			wcd_usbc_analog_en2n_idle: wcd_usbc_ana_en2n_idle {
+				mux {
+					pins = "gpio60";
+					function = "gpio";
+				};
+				config {
+					pins = "gpio60";
+					drive-strength = <2>;
+					bias-disable;
+					output-high;
+				};
+			};
+
+			wcd_usbc_analog_en2n_active: wcd_usbc_ana_en2n_active {
+				mux {
+					pins = "gpio60";
+					function = "gpio";
+				};
+				config {
+					pins = "gpio60";
+					drive-strength = <2>;
+					bias-pull-down;
+					output-low;
+				};
+			};
+		};
 
 		cdc_reset_ctrl {
 			cdc_reset_sleep: cdc_reset_sleep {
@@ -937,10 +993,90 @@
 			};
 		};
 
+		cam_sensor_depth_default: cam_sensor_depth_default {
+			mux {
+				pins = "gpio28","gpio23","gpio7";
+				function = "gpio";
+			};
+
+			config {
+				pins = "gpio28","gpio23","gpio7";
+				bias-disable; /* No PULL */
+				drive-strength = <2>; /* 2 MA */
+			};
+		};
+
+		cam_sensor_depth_sleep: cam_sensor_depth_sleep {
+			mux {
+				pins = "gpio28","gpio23","gpio7";
+				function = "gpio";
+			};
+
+			config {
+				pins = "gpio28","gpio23","gpio7";
+				bias-disable; /* No PULL */
+				drive-strength = <2>; /* 2 MA */
+			};
+		};
+
+		cam_sensor_depth_v1_active: cam_sensor_depth_v1_active {
+			/* Depth VANA */
+			mux {
+				pins = "gpio24";
+				function = "gpio";
+			};
+
+			config {
+				pins = "gpio24";
+				bias-disable; /* No PULL */
+				drive-strength = <2>; /* 2 MA */
+			};
+		};
+
+		cam_sensor_depth_v1_sleep: cam_sensor_depth_v1_sleep {
+			mux {
+				pins = "gpio24";
+				function = "gpio";
+			};
+
+			config {
+				pins = "gpio24";
+				bias-disable; /* No PULL */
+				drive-strength = <2>; /* 2 MA */
+			};
+		};
+
+		cam_sensor_depth_v2_active: cam_sensor_depth_v2_active {
+			/* Depth CUSTOM2 */
+			mux {
+				pins = "gpio21";
+				function = "gpio";
+			};
+
+			config {
+				pins = "gpio21";
+				bias-disable; /* No PULL */
+				drive-strength = <2>; /* 2 MA */
+			};
+		};
+
+		cam_sensor_depth_v2_sleep: cam_sensor_depth_v2_sleep {
+			mux {
+				pins = "gpio21";
+				function = "gpio";
+			};
+
+			config {
+				pins = "gpio21";
+				bias-disable; /* No PULL */
+				drive-strength = <2>; /* 2 MA */
+			};
+		};
+
 		cam_sensor_mclk0_active: cam_sensor_mclk0_active {
 			/* MCLK0 */
 			mux {
-				/* CLK, DATA */
+				/* CLK */
 				pins = "gpio13";
 				function = "cam_mclk";
 			};
@@ -955,7 +1091,7 @@
 		cam_sensor_mclk0_suspend: cam_sensor_mclk0_suspend {
 			/* MCLK0 */
 			mux {
-				/* CLK, DATA */
+				/* CLK */
 				pins = "gpio13";
 				function = "cam_mclk";
 			};
@@ -1249,7 +1385,7 @@
 		cam_sensor_mclk1_active: cam_sensor_mclk1_active {
 			/* MCLK1 */
 			mux {
-				/* CLK, DATA */
+				/* CLK */
 				pins = "gpio14";
 				function = "cam_mclk";
 			};
@@ -1264,13 +1400,43 @@
 		cam_sensor_mclk1_suspend: cam_sensor_mclk1_suspend {
 			/* MCLK1 */
 			mux {
-				/* CLK, DATA */
+				/* CLK */
 				pins = "gpio14";
 				function = "cam_mclk";
 			};
 
 			config {
 				pins = "gpio14";
+				bias-pull-down; /* PULL DOWN */
+				drive-strength = <2>; /* 2 MA */
+			};
+		};
+
+		cam_sensor_mclk3_active: cam_sensor_mclk3_active {
+			/* MCLK3 */
+			mux {
+				/* CLK */
+				pins = "gpio16";
+				function = "cam_mclk";
+			};
+
+			config {
+				pins = "gpio16";
+				bias-disable; /* No PULL */
+				drive-strength = <2>; /* 2 MA */
+			};
+		};
+
+		cam_sensor_mclk3_suspend: cam_sensor_mclk3_suspend {
+			/* MCLK3 */
+			mux {
+				/* CLK */
+				pins = "gpio16";
+				function = "cam_mclk";
+			};
+
+			config {
+				pins = "gpio16";
 				bias-pull-down; /* PULL DOWN */
 				drive-strength = <2>; /* 2 MA */
 			};
@@ -1412,7 +1578,7 @@
 		cam_sensor_mclk2_active: cam_sensor_mclk2_active {
 			/* MCLK1 */
 			mux {
-				/* CLK, DATA */
+				/* CLK */
 				pins = "gpio15";
 				function = "cam_mclk";
 			};
@@ -1427,7 +1593,7 @@
 		cam_sensor_mclk2_suspend: cam_sensor_mclk2_suspend {
 			/* MCLK1 */
 			mux {
-				/* CLK, DATA */
+				/* CLK */
 				pins = "gpio15";
 				function = "cam_mclk";
 			};
@@ -1448,6 +1614,21 @@
 
 			config {
 				pins = "gpio28", "gpio29";
+				bias-disable; /* No PULL */
+				drive-strength = <2>; /* 2 MA */
+			};
+		};
+
+
+		cam_sensor_front_iris_active: cam_sensor_front_iris_active {
+			/* RESET */
+			mux {
+				pins = "gpio23";
+				function = "gpio";
+			};
+
+			config {
+				pins = "gpio23";
 				bias-disable; /* No PULL */
 				drive-strength = <2>; /* 2 MA */
 			};
@@ -1514,6 +1695,20 @@
 
 			config {
 				pins = "gpio28";
+				bias-disable; /* No PULL */
+				drive-strength = <2>; /* 2 MA */
+			};
+		};
+
+		cam_sensor_front_iris_suspend: cam_sensor_front_iris_suspend {
+			/* RESET */
+			mux {
+				pins = "gpio23";
+				function = "gpio";
+			};
+
+			config {
+				pins = "gpio23";
 				bias-disable; /* No PULL */
 				drive-strength = <2>; /* 2 MA */
 			};
@@ -1917,16 +2112,28 @@
 		led_enable: led_enable {
 			mux {
 				pins = "gpio21";
-				drive_strength = <16>;
+				function = "gpio";
+			};
+
+			config {
+				pins = "gpio21";
+				drive_strength = <2>;
 				output-high;
+				bias-disable;
 			};
 		};
 
 		led_disable: led_disable {
 			mux {
 				pins = "gpio21";
+				function = "gpio";
+			};
+
+			config {
+				pins = "gpio21";
 				drive_strength = <2>;
 				output-low;
+				bias-disable;
 			};
 		};
 

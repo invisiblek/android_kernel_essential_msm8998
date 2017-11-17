@@ -26,6 +26,7 @@
 #include <linux/highmem.h>
 #include <soc/qcom/scm.h>
 #include <soc/qcom/secure_buffer.h>
+#include <trace/events/trace_msm_pil_event.h>
 
 #include "peripheral-loader.h"
 #include "pil-q6v5.h"
@@ -77,7 +78,8 @@
 #define MSS_MAGIC			0XAABADEAD
 /* CX_IPEAK Parameters */
 #define CX_IPEAK_MSS			BIT(5)
-
+/* Timeout value for MBA boot when minidump is enabled */
+#define MBA_ENCRYPTION_TIMEOUT	3000
 enum scm_cmd {
 	PAS_MEM_SETUP_CMD = 2,
 };
@@ -243,7 +245,12 @@ static int pil_msa_wait_for_mba_ready(struct q6v5_data *drv)
 	struct device *dev = drv->desc.dev;
 	int ret;
 	u32 status;
-	u64 val = is_timeout_disabled() ? 0 : pbl_mba_boot_timeout_ms * 1000;
+	u64 val;
+
+	if (of_property_read_bool(dev->of_node, "qcom,minidump-id"))
+		pbl_mba_boot_timeout_ms = MBA_ENCRYPTION_TIMEOUT;
+
+	val = is_timeout_disabled() ? 0 : pbl_mba_boot_timeout_ms * 1000;
 
 	/* Wait for PBL completion. */
 	ret = readl_poll_timeout(drv->rmb_base + RMB_PBL_STATUS, status,
@@ -462,6 +469,7 @@ static int pil_mss_reset(struct pil_desc *pil)
 	phys_addr_t start_addr = pil_get_entry_addr(pil);
 	int ret;
 
+	trace_pil_func(__func__);
 	if (drv->mba_dp_phys)
 		start_addr = drv->mba_dp_phys;
 
@@ -559,6 +567,7 @@ int pil_mss_reset_load_mba(struct pil_desc *pil)
 	const u8 *data;
 	struct device *dma_dev = md->mba_mem_dev_fixed ?: &md->mba_mem_dev;
 
+        trace_pil_func(__func__);
 	#ifdef CONFIG_ESSENTIAL_NV
 	pr_notice("%s: %s\n", __func__, pil->name);
 	if (!(strncmp(pil->name, "modem", sizeof(char)*5)))
@@ -708,6 +717,7 @@ static int pil_msa_auth_modem_mdt(struct pil_desc *pil, const u8 *metadata,
 	DEFINE_DMA_ATTRS(attrs);
 
 
+	trace_pil_func(__func__);
 	dma_dev->coherent_dma_mask = DMA_BIT_MASK(sizeof(dma_addr_t) * 8);
 	dma_set_attr(DMA_ATTR_SKIP_ZEROING, &attrs);
 	dma_set_attr(DMA_ATTR_STRONGLY_ORDERED, &attrs);

@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -1269,6 +1269,11 @@ static int msm_eeprom_spi_remove(struct spi_device *sdev)
 		return 0;
 	}
 
+	if (!e_ctrl->eboard_info) {
+		pr_err("%s: board info is NULL\n", __func__);
+		return 0;
+	}
+
 	msm_camera_i2c_dev_put_clk_info(
 		&e_ctrl->i2c_client.spi_client->spi_master->dev,
 		&e_ctrl->eboard_info->power_info.clk_info,
@@ -1668,6 +1673,7 @@ static int msm_eeprom_platform_probe(struct platform_device *pdev)
 	CDBG("%s qcom,eeprom-name %s, rc %d\n", __func__,
 		eb_info->eeprom_name, rc);
 	if (rc < 0) {
+		pr_err("%s failed %d\n", __func__, __LINE__);
 		e_ctrl->userspace_probe = 1;
 	}
 
@@ -1784,6 +1790,11 @@ static int msm_eeprom_platform_remove(struct platform_device *pdev)
 	e_ctrl = (struct msm_eeprom_ctrl_t *)v4l2_get_subdevdata(sd);
 	if (!e_ctrl) {
 		pr_err("%s: eeprom device is NULL\n", __func__);
+		return 0;
+	}
+
+	if (!e_ctrl->eboard_info) {
+		pr_err("%s: board info is NULL\n", __func__);
 		return 0;
 	}
 

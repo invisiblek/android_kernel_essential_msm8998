@@ -111,7 +111,9 @@ struct mmc_request {
 	struct mmc_cmdq_req	*cmdq_req;
 	struct request *req;
 	ktime_t io_start;
-	int lat_hist_enabled;
+#ifdef CONFIG_BLOCK
+	int					lat_hist_enabled;
+#endif
 };
 
 struct mmc_bus_ops {
@@ -221,6 +223,7 @@ extern void mmc_cmdq_clk_scaling_start_busy(struct mmc_host *host,
 	bool lock_needed);
 extern void mmc_cmdq_clk_scaling_stop_busy(struct mmc_host *host,
 	bool lock_needed, bool is_cmdq_dcmd);
+extern void mmc_recovery_fallback_lower_speed(struct mmc_host *host);
 
 /**
  *	mmc_claim_host - exclusively claim a host

@@ -204,6 +204,7 @@ static bool cluster_info_probed;
 static bool cluster_info_nodes_called;
 static bool in_suspend, retry_in_progress;
 static bool lmh_dcvs_available;
+static bool lmh_dcvs_is_supported;
 static int *tsens_id_map;
 static int *zone_id_tsens_map;
 static DEFINE_MUTEX(vdd_rstr_mutex);
@@ -999,7 +1000,7 @@ static int  msm_thermal_cpufreq_callback(struct notifier_block *nfb,
 
 	switch (event) {
 	case CPUFREQ_ADJUST:
-		max_freq_req = (lmh_dcvs_available) ? UINT_MAX :
+		max_freq_req = (lmh_dcvs_is_supported) ? UINT_MAX :
 			cpus[policy->cpu].parent_ptr->limited_max_freq;
 		min_freq_req = cpus[policy->cpu].parent_ptr->limited_min_freq;
 		pr_debug("mitigating CPU%d to freq max: %u min: %u\n",
@@ -2853,9 +2854,9 @@ static void msm_thermal_bite(int zone_id, int temp)
 	int tsens_id = 0;
 	int ret = 0;
 
-	#ifdef CONFIG_ESSENTIAL_APR
+#ifdef CONFIG_ESSENTIAL_APR
 	qpnp_pon_set_restart_reason(REASON_OVER_TEMPERATURE);
-	#endif
+#endif
 
 	ret = zone_id_to_tsen_id(zone_id, &tsens_id);
 	if (ret < 0) {
@@ -2866,7 +2867,7 @@ static void msm_thermal_bite(int zone_id, int temp)
 			tsens_id, temp);
 	}
 	/* If it is a secure device ignore triggering the thermal bite. */
-	if (scm_is_secure_device())
+	if (!scm_is_secure_device())
 		return;
 	if (!is_scm_armv8()) {
 		scm_call_atomic1(SCM_SVC_BOOT, THERM_SECURE_BITE_CMD, 0);
@@ -5387,7 +5388,7 @@ int msm_thermal_init(struct msm_thermal_data *pdata)
 	if (ret)
 		pr_err("cannot register cpufreq notifier. err:%d\n", ret);
 
-	if (!lmh_dcvs_available) {
+	if (!lmh_dcvs_is_supported) {
 		register_reboot_notifier(&msm_thermal_reboot_notifier);
 		pm_notifier(msm_thermal_suspend_callback, 0);
 	}
@@ -7417,11 +7418,12 @@ static int msm_thermal_dev_probe(struct platform_device *pdev)
 		pr_err("thermal pre init failed. err:%d\n", ret);
 		goto probe_exit;
 	}
+	probe_sensor_info(node, &data, pdev);
 	ret = probe_deferrable_properties(node, &data, pdev);
 	if (ret)
 		goto probe_exit;
 
-	probe_sensor_info(node, &data, pdev);
+	lmh_dcvs_is_supported = of_property_read_bool(node, "clock-names");
 	probe_cc(node, &data, pdev);
 	probe_freq_mitigation(node, &data, pdev);
 	probe_cx_phase_ctrl(node, &data, pdev);

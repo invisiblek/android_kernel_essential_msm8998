@@ -231,9 +231,9 @@ EXPORT_SYMBOL_GPL(kernel_restart);
 
 static void kernel_shutdown_prepare(enum system_states state)
 {
-	#ifdef CONFIG_ESSENTIAL_APR
+#ifdef CONFIG_ESSENTIAL_APR
 	qpnp_pon_set_restart_reason(REASON_KERNEL_SHUTDOWN);
-	#endif
+#endif
 
 	blocking_notifier_call_chain(&reboot_notifier_list,
 		(state == SYSTEM_HALT) ? SYS_HALT : SYS_POWER_OFF, NULL);

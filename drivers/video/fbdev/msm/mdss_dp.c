@@ -421,6 +421,22 @@ static int mdss_dp_clk_init(struct mdss_dp_drv_pdata *dp_drv,
 				__func__);
 			dp_drv->pixel_parent = NULL;
 		}
+
+		dp_drv->pixel_clk_two_div = devm_clk_get(dev,
+			"pixel_clk_two_div");
+		if (IS_ERR(dp_drv->pixel_clk_two_div)) {
+			pr_debug("%s: Unable to get DP pixel two div clk\n",
+				__func__);
+			dp_drv->pixel_clk_two_div = NULL;
+		}
+
+		dp_drv->pixel_clk_four_div = devm_clk_get(dev,
+			"pixel_clk_four_div");
+		if (IS_ERR(dp_drv->pixel_clk_four_div)) {
+			pr_debug("%s: Unable to get DP pixel four div clk\n",
+				__func__);
+			dp_drv->pixel_clk_four_div = NULL;
+		}
 	} else {
 		if (dp_drv->pixel_parent)
 			devm_clk_put(dev, dp_drv->pixel_parent);
@@ -1094,8 +1110,14 @@ static int dp_audio_info_setup(struct platform_device *pdev,
 	struct mdss_dp_drv_pdata *dp_ctrl = platform_get_drvdata(pdev);
 
 	if (!dp_ctrl || !params) {
-		DEV_ERR("%s: invalid input\n", __func__);
-		return -ENODEV;
+		pr_err("invalid input\n");
+		rc = -ENODEV;
+		goto end;
+	}
+
+	if (!dp_ctrl->power_on) {
+		pr_debug("DP is already power off\n");
+		goto end;
 	}
 
 	mdss_dp_audio_setup_sdps(&dp_ctrl->ctrl_io, params->num_of_channels);
@@ -1103,6 +1125,7 @@ static int dp_audio_info_setup(struct platform_device *pdev,
 	mdss_dp_set_safe_to_exit_level(&dp_ctrl->ctrl_io, dp_ctrl->lane_cnt);
 	mdss_dp_audio_enable(&dp_ctrl->ctrl_io, true);
 
+end:
 	return rc;
 } /* dp_audio_info_setup */
 
@@ -1131,6 +1154,11 @@ static void dp_audio_teardown_done(struct platform_device *pdev)
 
 	if (!dp) {
 		pr_err("invalid input\n");
+		return;
+	}
+
+	if (!dp->power_on) {
+		pr_err("DP is already power off\n");
 		return;
 	}
 
@@ -1405,6 +1433,16 @@ static int mdss_dp_enable_mainlink_clocks(struct mdss_dp_drv_pdata *dp)
 		return ret;
 	}
 
+	if (dp->pixel_parent && dp->pixel_clk_two_div &&
+		dp->pixel_clk_four_div) {
+		if (dp->link_rate == DP_LINK_RATE_540)
+			clk_set_parent(dp->pixel_parent,
+				dp->pixel_clk_four_div);
+		else
+			clk_set_parent(dp->pixel_parent,
+				dp->pixel_clk_two_div);
+	}
+
 	mdss_dp_set_clock_rate(dp, "ctrl_link_clk",
 		(dp->link_rate * DP_LINK_RATE_MULTIPLIER) / DP_KHZ_TO_HZ);
 
@@ -1455,7 +1493,7 @@ static void mdss_dp_configure_source_params(struct mdss_dp_drv_pdata *dp,
 	mdss_dp_config_misc(dp,
 		mdss_dp_bpp_to_test_bit_depth(mdss_dp_get_bpp(dp)),
 		mdss_dp_get_colorimetry_config(dp));
-	mdss_dp_sw_config_msa(&dp->ctrl_io, dp->link_rate, &dp->dp_cc_io);
+	mdss_dp_sw_config_msa(dp);
 	mdss_dp_timing_cfg(&dp->ctrl_io, &dp->panel_data.panel_info);
 }
 
@@ -1625,6 +1663,7 @@ int mdss_dp_on_hpd(struct mdss_dp_drv_pdata *dp_drv)
 	dp_drv->link_rate = mdss_dp_gen_link_clk(dp_drv);
 	if (!dp_drv->link_rate) {
 		pr_err("Unable to configure required link rate\n");
+		mdss_dp_clk_ctrl(dp_drv, DP_CORE_PM, false);
 		ret = -EINVAL;
 		goto exit;
 	}
@@ -1736,7 +1775,7 @@ int mdss_dp_on(struct mdss_panel_data *pdata)
 
 static bool mdss_dp_is_ds_bridge(struct mdss_dp_drv_pdata *dp)
 {
-	return dp->dpcd.downstream_port.dfp_present;
+	return dp->dpcd.downstream_port.dsp_present;
 }
 
 static bool mdss_dp_is_ds_bridge_sink_count_zero(struct mdss_dp_drv_pdata *dp)
@@ -2104,6 +2143,12 @@ static int mdss_dp_notify_clients(struct mdss_dp_drv_pdata *dp,
 			goto invalid_request;
 		if (dp->hpd_notification_status == NOTIFY_DISCONNECT_IRQ_HPD) {
 			/*
+			 * Just in case if NOTIFY_DISCONNECT_IRQ_HPD is timedout
+			 */
+			if (dp->power_on)
+				mdss_dp_state_ctrl(&dp->ctrl_io, ST_PUSH_IDLE);
+
+			/*
 			 * user modules already turned off. Need to explicitly
 			 * turn off DP core here.
 			 */
@@ -2176,6 +2221,10 @@ static int mdss_dp_process_hpd_high(struct mdss_dp_drv_pdata *dp)
 	ret = mdss_dp_dpcd_cap_read(dp);
 	if (ret || !mdss_dp_aux_is_link_rate_valid(dp->dpcd.max_link_rate) ||
 		!mdss_dp_aux_is_lane_count_valid(dp->dpcd.max_lane_count)) {
+		if (ret == EDP_AUX_ERR_TOUT) {
+			pr_err("DPCD read timedout, skip connect notification\n");
+			goto end;
+		}
 		/*
 		 * If there is an error in parsing DPCD or if DPCD reports
 		 * unsupported link parameters then set the default link
@@ -2979,6 +3028,12 @@ static void mdss_dp_mainlink_push_idle(struct mdss_panel_data *pdata)
 
 	/* wait until link training is completed */
 	mutex_lock(&dp_drv->train_mutex);
+
+	if (!dp_drv->power_on) {
+		pr_err("DP Controller not powered on\n");
+		mutex_unlock(&dp_drv->train_mutex);
+		return;
+	}
 
 	reinit_completion(&dp_drv->idle_comp);
 	mdss_dp_state_ctrl(&dp_drv->ctrl_io, ST_PUSH_IDLE);

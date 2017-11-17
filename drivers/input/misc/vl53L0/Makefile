@@ -9,7 +9,7 @@ FEATURE_USE_CCI := false
 ifeq ($(FEATURE_USE_CCI), true)
 ccflags-y	+= -Idrivers/input/misc/vl53L0/inc -DCAMERA_CCI
 else
-ccflags-y	+= -Idrivers/input/misc/vl53L0/inc 
+ccflags-y	+= -Idrivers/input/misc/vl53L0/inc
 endif
 
 ccflags-y += -Idrivers/media/platform/msm/camera_v2/sensor/io

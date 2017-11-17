@@ -15,6 +15,7 @@
 #include "../qcom/msm-smb138x.dtsi"
 #include "msm8998-pinctrl-mata.dtsi"
 #include "msm8998-camera-sensor-mata.dtsi"
+#include "../qcom/msm8998-mdss-panels.dtsi"
 / {
 	aliases {
 		i2c6 = &i2c_6;
@@ -148,18 +149,14 @@
 };
 
 &pmi8998_charger {
+	qcom,step-charging-enable;
+	qcom,sw-jeita-enable;
+	qcom,fcc-max-ua = <2500000>;
+	qcom,fv-max-uv = <4400000>;
 	qcom,usb-icl-ua=<3000000>;
 	qcom,dc-icl-ua=<3000000>;
 	qcom,hvdcp-disable;
-	qcom,fcc-max-ua = <2000000>;
-	qcom,fv-max-uv = <4400000>;
-	qcom,step-soc-thresholds = <75 85 90 95>;
-	qcom,step-current-deltas = <500000 0 0 0 0>;
 	qcom,auto-recharge-soc;
-	qcom,jeita-fv-comp-cool = <0>;
-	qcom,jeita-cc-comp-cool = <1400000>;
-	qcom,jeita-fv-comp-warm = <300000>;
-	qcom,jeita-cc-comp-warm = <500000>;
 };
 
 &pmi8998_fg {
@@ -402,6 +399,7 @@
 		reg = <0x29>;
 		vdd-supply = <&pm8998_l21>;
 		qcom,en_gpio = <&tlmm 126 0x00>;
+		stm,irq-gpio = <&tlmm 26 0x2008>;
 		pinctrl-names = "vl53l0_en_active";
 		pinctrl-0 = <&msm8998_gpio126_default &msm8998_gpio26_default>;
 	};
@@ -427,6 +425,21 @@
 		pinctrl-1 = <&nfc_int_suspend &nfc_enable_suspend &msm8998_gpio93_default>;
 		clocks = <&clock_gcc clk_ln_bb_clk3_pin>;
 		clock-names = "ref_clk";
+	};
+	felica:nfc@0x28 {
+		compatible = "sony,cxd224x-i2c";
+		status = "disabled";
+		reg = <0x28>;
+		clock-frequency = <400000>;
+		sony,nfc_int = <&tlmm 122 0x00>;
+		sony,nfc_rst = <&tlmm 108 0x00>;
+		sony,nfc_wake = <&tlmm 12 0x00>;
+		sony,nfc_ven = <&tlmm 92 0x00>;
+		interrupt-parent = <&tlmm>;
+		interrupts = <122 2>;
+		interrupt-names = "nfc_irq";
+		pinctrl-names = "nfc_active";
+		pinctrl-0 = <&msm8998_gpio122_default &msm8998_gpio108_default &msm8998_gpio12_active &msm8998_gpio92_active>;
 	};
 };
 
@@ -1265,11 +1278,8 @@
 	};
 
 	pcie0: qcom,pcie@01c00000 {
-		pinctrl-names = "default", "sleep";
-		pinctrl-0 = <&pcie0_perst_default
-			&pcie0_wake_default>;
-		pinctrl-1 = <&pcie0_perst_default
-			&pcie0_wake_sleep>;
+		pinctrl-names = "default";
+		pinctrl-0 = <>;
 	};
 
 	cti2: cti@6012000 {
@@ -1553,6 +1563,19 @@
 
 &usb3 {
 	qcom,core-clk-rate = <150000000>;
+};
+
+&snd_934x {
+	qcom,usbc-analog-en1_gpio = <>;
+	qcom,usbc-analog-en2_n_gpio = <>;
+};
+
+&wcd_usbc_analog_en1_gpio {
+	status = "disabled";
+};
+
+&wcd_usbc_analog_en2n_gpio {
+	status = "disabled";
 };
 
 &qusb_phy0 {

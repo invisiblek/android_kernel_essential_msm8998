@@ -125,6 +125,9 @@ static int qti_ice_setting_config(struct request *req,
 		return -EPERM;
 	}
 
+	if (!setting)
+		return -EINVAL;
+
 	if ((short)(crypto_data->key_index) >= 0) {
 
 		memcpy(&setting->crypto_data, crypto_data,
@@ -866,7 +869,7 @@ static int qcom_ice_restore_key_config(struct ice_device *ice_dev)
 static int qcom_ice_init_clocks(struct ice_device *ice)
 {
 	int ret = -EINVAL;
-	struct ice_clk_info *clki;
+	struct ice_clk_info *clki = NULL;
 	struct device *dev = ice->pdev;
 	struct list_head *head = &ice->clk_list_head;
 
@@ -910,7 +913,7 @@ out:
 static int qcom_ice_enable_clocks(struct ice_device *ice, bool enable)
 {
 	int ret = 0;
-	struct ice_clk_info *clki;
+	struct ice_clk_info *clki = NULL;
 	struct device *dev = ice->pdev;
 	struct list_head *head = &ice->clk_list_head;
 
@@ -972,7 +975,8 @@ static int qcom_ice_secure_ice_init(struct ice_device *ice_dev)
 
 static int qcom_ice_update_sec_cfg(struct ice_device *ice_dev)
 {
-	int ret = 0, scm_ret = 0;
+	int ret = 0;
+	u64 scm_ret = 0;
 
 	/* scm command buffer structure */
 	struct qcom_scm_cmd_buf {
@@ -998,7 +1002,7 @@ static int qcom_ice_update_sec_cfg(struct ice_device *ice_dev)
 	cbuf.device_id = ICE_TZ_DEV_ID;
 	ret = scm_restore_sec_cfg(cbuf.device_id, cbuf.spare, &scm_ret);
 	if (ret || scm_ret) {
-		pr_err("%s: failed, ret %d scm_ret %d\n",
+		pr_err("%s: failed, ret %d scm_ret %llu\n",
 						__func__, ret, scm_ret);
 		if (!ret)
 			ret = scm_ret;
@@ -1429,7 +1433,7 @@ static int qcom_ice_config_start(struct platform_device *pdev,
 	int ret = 0;
 	bool is_pfe = false;
 
-	if (!pdev || !req || !setting) {
+	if (!pdev || !req) {
 		pr_err("%s: Invalid params passed\n", __func__);
 		return -EINVAL;
 	}
@@ -1586,12 +1590,14 @@ struct platform_device *qcom_ice_get_pdevice(struct device_node *node)
 		if (ice_dev->pdev->of_node == node) {
 			pr_info("%s: found ice device %pK\n", __func__,
 			ice_dev);
+			ice_pdev = to_platform_device(ice_dev->pdev);
 			break;
 		}
 	}
 
-	ice_pdev = to_platform_device(ice_dev->pdev);
-	pr_info("%s: matching platform device %pK\n", __func__, ice_pdev);
+	if (ice_pdev)
+		pr_info("%s: matching platform device %pK\n", __func__,
+			ice_pdev);
 out:
 	return ice_pdev;
 }
@@ -1611,11 +1617,11 @@ static struct ice_device *get_ice_device_from_storage_type
 		if (!strcmp(ice_dev->ice_instance_type, storage_type)) {
 			pr_debug("%s: found ice device %pK\n",
 				__func__, ice_dev);
-			break;
+			return ice_dev;
 		}
 	}
 out:
-	return ice_dev;
+	return NULL;
 }
 
 static int enable_ice_setup(struct ice_device *ice_dev)

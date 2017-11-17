@@ -51,7 +51,7 @@
 #define SCM_EDLOAD_MODE			0X01
 #define SCM_DLOAD_CMD			0x10
 #define SCM_DLOAD_MINIDUMP		0X20
-
+#define SCM_DLOAD_BOTHDUMPS	(SCM_DLOAD_MINIDUMP | SCM_DLOAD_FULLDUMP)
 
 static int restart_mode;
 static void *restart_reason;
@@ -79,7 +79,7 @@ static int dload_type = SCM_DLOAD_FULLDUMP;
 static int download_mode = 0;
 static struct kobject dload_kobj;
 static void *dload_mode_addr, *dload_type_addr;
-static bool dload_mode_enabled = false;
+static bool dload_mode_enabled;
 static void *emergency_dload_mode_addr;
 #ifdef CONFIG_RANDOMIZE_BASE
 static void *kaslr_imem_addr;
@@ -340,26 +340,20 @@ static void msm_restart_prepare(const char *cmd)
 		} else if (!strncmp(cmd, "edl", 3)) {
 			enable_emergency_dload_mode();
 		} else {
-			#ifdef CONFIG_ESSENTIAL_APR
-			qpnp_pon_set_restart_reason(PON_RESTART_REASON_UNKNOWN);
-			#endif
 			__raw_writel(0x77665501, restart_reason);
 		}
 	}
 
-	#ifdef CONFIG_ESSENTIAL_APR
+#ifdef CONFIG_ESSENTIAL_APR
 	if (cmd != NULL) {
-		pr_notice("%s: cmd = (%s)\n", __func__, cmd);
 		if (!strncmp(cmd, "panic", 5)) {
 			need_warm_reset = true;
 			qpnp_pon_set_restart_reason(REASON_KERNEL_PANIC);
 			__raw_writel(0x520A450A, restart_reason);
-			set_dload_mode(download_mode);
 		} else if (strstr(cmd, "modem crashed")) {
 			need_warm_reset = true;
 			qpnp_pon_set_restart_reason(REASON_MODEM_FATAL);
 			__raw_writel(0x520B450B, restart_reason);
-			set_dload_mode(download_mode);
 		} else if (strstr(cmd, "exception in system process") ||
 			strstr(cmd, "Watchdog reboot system") ||
 			strstr(cmd, "system crash")) {
@@ -370,21 +364,15 @@ static void msm_restart_prepare(const char *cmd)
 			need_warm_reset = true;
 			qpnp_pon_set_restart_reason(REASON_UNKNOWN_RESET);
 			__raw_writel(0x520D450D, restart_reason);
-			set_dload_mode(download_mode);
-		} else if (!strncmp(cmd, "memory_test", 11)) {
-			qpnp_pon_set_restart_reason(REASON_MEMORY_TEST);
-			__raw_writel(0x520D450E, restart_reason);
+		} else {
+			qpnp_pon_set_restart_reason(PON_RESTART_REASON_UNKNOWN);
 		}
-	} else {
-		pr_notice("%s: cmd = NULL\n", __func__);
 	}
 
 	if (in_panic) {
-		pr_err("%s: in_panic = %d\n", __func__, in_panic);
 		need_warm_reset = true;
 		qpnp_pon_set_restart_reason(REASON_KERNEL_PANIC);
 		__raw_writel(0x520A450A, restart_reason);
-		set_dload_mode(download_mode);
 	}
 
 	if (need_warm_reset) {
@@ -392,11 +380,7 @@ static void msm_restart_prepare(const char *cmd)
 	} else {
 		qpnp_pon_system_pwr_off(PON_POWER_OFF_HARD_RESET);
 	}
-
-	pr_notice("%s: download_mode = %d\n", __func__, download_mode);
-	pr_notice("%s: need_warm_reset = %s\n", __func__, need_warm_reset?"true":"false");
-	pr_notice("%s: dload = (%s)\n", __func__, (get_dload_mode()? "true":"false"));
-	#endif
+#endif
 
 	flush_cache_all();
 
@@ -447,6 +431,7 @@ static void do_msm_restart(enum reboot_mode reboot_mode, const char *cmd)
 		msm_trigger_wdog_bite();
 #endif
 
+	scm_disable_sdi();
 	halt_spmi_pmic_arbiter();
 	deassert_ps_hold();
 
@@ -546,7 +531,8 @@ static ssize_t show_dload_mode(struct kobject *kobj, struct attribute *attr,
 				char *buf)
 {
 	return scnprintf(buf, PAGE_SIZE, "DLOAD dump type: %s\n",
-			(dload_type == SCM_DLOAD_MINIDUMP) ? "mini" : "full");
+		(dload_type == SCM_DLOAD_BOTHDUMPS) ? "both" :
+		((dload_type == SCM_DLOAD_MINIDUMP) ? "mini" : "full"));
 }
 
 static size_t store_dload_mode(struct kobject *kobj, struct attribute *attr,
@@ -560,8 +546,16 @@ static size_t store_dload_mode(struct kobject *kobj, struct attribute *attr,
 			return -ENODEV;
 		}
 		dload_type = SCM_DLOAD_MINIDUMP;
-	} else {
-		pr_err("Invalid value. Use 'full' or 'mini'\n");
+	} else if (sysfs_streq(buf, "both")) {
+		if (!minidump_enabled) {
+			pr_err("Minidump not enabled, setting fulldump only\n");
+			dload_type = SCM_DLOAD_FULLDUMP;
+			return count;
+		}
+		dload_type = SCM_DLOAD_BOTHDUMPS;
+	} else{
+		pr_err("Invalid Dump setup request..\n");
+		pr_err("Supported dumps:'full', 'mini', or 'both'\n");
 		return -EINVAL;
 	}
 

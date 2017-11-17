@@ -405,20 +405,19 @@ retry:
 	do {
 		struct edp_cmd cmd1 = *cmd;
 
-        mutex_lock(&dp->attention_lock);
-        connected = dp->cable_connected;
-        mutex_unlock(&dp->attention_lock);
+		mutex_lock(&dp->attention_lock);
+		connected = dp->cable_connected;
+		mutex_unlock(&dp->attention_lock);
 
-        if(!connected) {
-            pr_err("dp cable disconnected\n");
-            break;
-        }
+		if (!connected) {
+			pr_err("dp cable disconnected\n");
+			break;
+		}
 
 		dp->aux_error_num = EDP_AUX_ERR_NONE;
 		pr_debug("Trying %s, iteration count: %d\n",
 			mdss_dp_aux_transaction_to_string(transaction),
 			i + 1);
-
 		if (transaction == DP_AUX_READ)
 			ret = dp_aux_read_cmds(dp, &cmd1);
 		else if (transaction == DP_AUX_WRITE)
@@ -644,7 +643,8 @@ void dp_extract_edid_video_support(struct edp_edid *edid, char *buf)
 		pr_debug("Digital Video intf=%d color_depth=%d\n",
 			 edid->video_intf, edid->color_depth);
 	} else {
-		pr_err("Error, Analog video interface\n");
+		pr_debug("Analog video interface, set color depth to 8\n");
+		edid->color_depth = DP_TEST_BIT_DEPTH_8;
 	}
 };
 
@@ -683,6 +683,11 @@ char mdss_dp_gen_link_clk(struct mdss_dp_drv_pdata *dp)
 
 	pr_debug("clk_rate=%llu, bpp= %d, lane_cnt=%d\n",
 	       pinfo->clk_rate, pinfo->bpp, lane_cnt);
+
+	if (lane_cnt == 0) {
+		pr_warn("Invalid max lane count\n");
+		return 0;
+	}
 
 	/*
 	 * The max pixel clock supported is 675Mhz. The
@@ -1151,13 +1156,13 @@ int mdss_dp_dpcd_cap_read(struct mdss_dp_drv_pdata *ep)
 	pr_debug("rx_ports=%d", cap->num_rx_port);
 
 	data = *bp++; /* Byte 5: DOWN_STREAM_PORT_PRESENT */
-	cap->downstream_port.dfp_present = data & BIT(0);
-	cap->downstream_port.dfp_type = data & 0x6;
+	cap->downstream_port.dsp_present = data & BIT(0);
+	cap->downstream_port.dsp_type = (data & 0x6) >> 1;
 	cap->downstream_port.format_conversion = data & BIT(3);
 	cap->downstream_port.detailed_cap_info_available = data & BIT(4);
-	pr_debug("dfp_present = %d, dfp_type = %d\n",
-			cap->downstream_port.dfp_present,
-			cap->downstream_port.dfp_type);
+	pr_debug("dsp_present = %d, dsp_type = %d\n",
+			cap->downstream_port.dsp_present,
+			cap->downstream_port.dsp_type);
 	pr_debug("format_conversion = %d, detailed_cap_info_available = %d\n",
 			cap->downstream_port.format_conversion,
 			cap->downstream_port.detailed_cap_info_available);
@@ -1165,16 +1170,16 @@ int mdss_dp_dpcd_cap_read(struct mdss_dp_drv_pdata *ep)
 	bp += 1;	/* Skip Byte 6 */
 
 	data = *bp++; /* Byte 7: DOWN_STREAM_PORT_COUNT */
-	cap->downstream_port.dfp_count = data & 0x7;
-	if (cap->downstream_port.dfp_count > DP_MAX_DS_PORT_COUNT) {
+	cap->downstream_port.dsp_count = data & 0x7;
+	if (cap->downstream_port.dsp_count > DP_MAX_DS_PORT_COUNT) {
 		pr_debug("DS port count %d greater that max (%d) supported\n",
-			cap->downstream_port.dfp_count, DP_MAX_DS_PORT_COUNT);
-		cap->downstream_port.dfp_count = DP_MAX_DS_PORT_COUNT;
+			cap->downstream_port.dsp_count, DP_MAX_DS_PORT_COUNT);
+		cap->downstream_port.dsp_count = DP_MAX_DS_PORT_COUNT;
 	}
 	cap->downstream_port.msa_timing_par_ignored = data & BIT(6);
 	cap->downstream_port.oui_support = data & BIT(7);
-	pr_debug("dfp_count = %d, msa_timing_par_ignored = %d\n",
-			cap->downstream_port.dfp_count,
+	pr_debug("dsp_count = %d, msa_timing_par_ignored = %d\n",
+			cap->downstream_port.dsp_count,
 			cap->downstream_port.msa_timing_par_ignored);
 	pr_debug("oui_support = %d\n", cap->downstream_port.oui_support);
 
@@ -1538,7 +1543,7 @@ static void dp_sink_parse_sink_count(struct mdss_dp_drv_pdata *ep)
 	data = *bp++;
 
 	/* BIT 7, BIT 5:0 */
-	ep->sink_count.count = (data & BIT(7)) << 6 | (data & 0x63);
+	ep->sink_count.count = (data & BIT(7)) >> 1 | (data & 0x3F);
 	/* BIT 6*/
 	ep->sink_count.cp_ready = data & BIT(6);
 

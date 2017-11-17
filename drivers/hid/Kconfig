@@ -258,7 +258,7 @@ config HID_ESSENTIAL
 	tristate "USB-C to Jack dongle for Mata devices"
 	depends on USB_HID
 	---help---
-	Support for the USC-C to Jack dongle for Mata devices.
+	Support for the USB-C to Jack dongle for Mata devices.
 
 config HID_EZKEY
 	tristate "Ezkey BTC 8193 keyboard"

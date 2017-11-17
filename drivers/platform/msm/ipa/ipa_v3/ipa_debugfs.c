@@ -61,6 +61,9 @@ const char *ipa3_event_name[] = {
 	__stringify(ECM_DISCONNECT),
 	__stringify(IPA_TETHERING_STATS_UPDATE_STATS),
 	__stringify(IPA_TETHERING_STATS_UPDATE_NETWORK_STATS),
+	__stringify(IPA_QUOTA_REACH),
+	__stringify(IPA_SSR_BEFORE_SHUTDOWN),
+	__stringify(IPA_SSR_AFTER_POWERUP),
 };
 
 const char *ipa3_hdr_l2_type_name[] = {
@@ -860,10 +863,11 @@ static ssize_t ipa3_read_flt(struct file *file, char __user *ubuf, size_t count,
 				eq = true;
 			} else {
 				rt_tbl = ipa3_id_find(entry->rule.rt_tbl_hdl);
-				if (rt_tbl)
-					rt_tbl_idx = rt_tbl->idx;
+				if (rt_tbl == NULL ||
+					rt_tbl->cookie != IPA_RT_TBL_COOKIE)
+					rt_tbl_idx =  ~0;
 				else
-					rt_tbl_idx = ~0;
+					rt_tbl_idx = rt_tbl->idx;
 				bitmap = entry->rule.attrib.attrib_mask;
 				eq = false;
 			}

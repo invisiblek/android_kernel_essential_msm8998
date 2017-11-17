@@ -41,9 +41,13 @@ int msm_comm_try_set_prop(struct msm_vidc_inst *inst,
 	enum hal_property ptype, void *pdata);
 int msm_comm_try_get_prop(struct msm_vidc_inst *inst,
 	enum hal_property ptype, union hal_get_property *hprop);
-int msm_comm_set_scratch_buffers(struct msm_vidc_inst *inst);
+int msm_comm_set_scratch_buffers(struct msm_vidc_inst *inst,
+						bool max_int_buffer);
 int msm_comm_set_persist_buffers(struct msm_vidc_inst *inst);
 int msm_comm_set_output_buffers(struct msm_vidc_inst *inst);
+int allocate_and_set_internal_bufs(struct msm_vidc_inst *inst,
+			struct hal_buffer_requirements *internal_bufreq,
+			struct msm_vidc_list *buf_list, bool set_on_fw);
 int msm_comm_queue_output_buffers(struct msm_vidc_inst *inst);
 int msm_comm_qbuf(struct msm_vidc_inst *inst, struct vb2_buffer *vb);
 void msm_comm_scale_clocks_and_bus(struct msm_vidc_inst *inst);
@@ -99,4 +103,5 @@ void msm_comm_cleanup_internal_buffers(struct msm_vidc_inst *inst);
 int msm_vidc_comm_s_parm(struct msm_vidc_inst *inst, struct v4l2_streamparm *a);
 bool msm_comm_turbo_session(struct msm_vidc_inst *inst);
 void msm_comm_print_inst_info(struct msm_vidc_inst *inst);
+void msm_comm_sort_ctrl(void);
 #endif

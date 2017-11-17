@@ -30,7 +30,6 @@
 #include <linux/irqchip/arm-gic-v3.h>
 #include <linux/syscore_ops.h>
 #include <linux/irqchip/msm-mpm-irq.h>
-#include <linux/wakeup_reason.h>
 
 #include <asm/cputype.h>
 #include <asm/exception.h>
@@ -155,7 +154,7 @@ static void gic_enable_redist(bool enable)
 			return;	/* No PM support in this redistributor */
 	}
 
-	while (count--) {
+	while (--count) {
 		val = readl_relaxed(rbase + GICR_WAKER);
 		if (enable ^ (val & GICR_WAKER_ChildrenAsleep))
 			break;
@@ -444,7 +443,6 @@ static void gic_show_resume_irq(struct gic_chip_data *gic)
 			name = desc->action->name;
 
 		pr_warn("%s: %d triggered %s\n", __func__, irq, name);
-		log_base_wakeup_reason(irq);
 	}
 }
 
@@ -707,7 +705,7 @@ static struct notifier_block gic_cpu_notifier = {
 static u16 gic_compute_target_list(int *base_cpu, const struct cpumask *mask,
 				   unsigned long cluster_id)
 {
-	int cpu = *base_cpu;
+	int next_cpu, cpu = *base_cpu;
 	unsigned long mpidr = cpu_logical_map(cpu);
 	u16 tlist = 0;
 
@@ -721,9 +719,10 @@ static u16 gic_compute_target_list(int *base_cpu, const struct cpumask *mask,
 
 		tlist |= 1 << (mpidr & 0xf);
 
-		cpu = cpumask_next(cpu, mask);
-		if (cpu >= nr_cpu_ids)
+		next_cpu = cpumask_next(cpu, mask);
+		if (next_cpu >= nr_cpu_ids)
 			goto out;
+		cpu = next_cpu;
 
 		mpidr = cpu_logical_map(cpu);
 
@@ -793,6 +792,9 @@ static int gic_set_affinity(struct irq_data *d, const struct cpumask *mask_val,
 	void __iomem *reg;
 	int enabled;
 	u64 val;
+
+	if (cpu >= nr_cpu_ids)
+		return -EINVAL;
 
 	if (gic_irq_in_rdist(d))
 		return -EINVAL;

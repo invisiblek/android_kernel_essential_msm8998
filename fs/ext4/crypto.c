@@ -271,7 +271,7 @@ static int ext4_page_crypto(struct inode *inode,
 	struct crypto_ablkcipher *tfm = ci->ci_ctfm;
 	int res = 0;
 
-	req = ablkcipher_request_alloc(tfm, GFP_NOFS);
+	req = ablkcipher_request_alloc(tfm, gfp_flags);
 	if (!req) {
 		printk_ratelimited(KERN_ERR
 				   "%s: crypto_request_alloc() failed\n",
@@ -389,12 +389,14 @@ int ext4_decrypt(struct page *page)
 				page->index, page, page, GFP_NOFS);
 }
 
-int ext4_encrypted_zeroout(struct inode *inode, ext4_lblk_t lblk,
-			   ext4_fsblk_t pblk, ext4_lblk_t len)
+int ext4_encrypted_zeroout(struct inode *inode, struct ext4_extent *ex)
 {
 	struct ext4_crypto_ctx	*ctx;
 	struct page		*ciphertext_page = NULL;
 	struct bio		*bio;
+	ext4_lblk_t		lblk = le32_to_cpu(ex->ee_block);
+	ext4_fsblk_t		pblk = ext4_ext_pblock(ex);
+	unsigned int		len = ext4_ext_get_actual_len(ex);
 	int			ret, err = 0;
 
 #if 0

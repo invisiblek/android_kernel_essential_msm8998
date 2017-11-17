@@ -246,11 +246,7 @@ static u32 ufs_query_desc_max_size[] = {
 	QUERY_DESC_RFU_MAX_SIZE,
 	QUERY_DESC_GEOMETRY_MAZ_SIZE,
 	QUERY_DESC_POWER_MAX_SIZE,
-#ifdef CONFIG_ESSENTIAL_UFS
-	QUERY_DESC_DEVICE_HEALTH_MAX_SIZE,
-#else
 	QUERY_DESC_RFU_MAX_SIZE,
-#endif
 };
 
 enum {
@@ -369,6 +365,8 @@ static int ufshcd_disable_clocks(struct ufs_hba *hba,
 				 bool is_gating_context);
 static int ufshcd_disable_clocks_skip_ref_clk(struct ufs_hba *hba,
 					      bool is_gating_context);
+static void ufshcd_hold_all(struct ufs_hba *hba);
+static void ufshcd_release_all(struct ufs_hba *hba);
 static int ufshcd_set_vccq_rail_unused(struct ufs_hba *hba, bool unused);
 static inline void ufshcd_add_delay_before_dme_cmd(struct ufs_hba *hba);
 static inline void ufshcd_save_tstamp_of_last_dme_cmd(struct ufs_hba *hba);
@@ -520,14 +518,145 @@ static inline void ufshcd_remove_non_printable(char *val)
 		*val = ' ';
 }
 
+#define UFSHCD_MAX_CMD_LOGGING	200
+
 #ifdef CONFIG_TRACEPOINTS
-static void ufshcd_add_command_trace(struct ufs_hba *hba,
-		unsigned int tag, const char *str)
+static inline void ufshcd_add_command_trace(struct ufs_hba *hba,
+			struct ufshcd_cmd_log_entry *entry, u8 opcode)
 {
-	sector_t lba = -1;
-	u8 opcode = 0;
-	u32 intr, doorbell;
+	if (trace_ufshcd_command_enabled()) {
+		u32 intr = ufshcd_readl(hba, REG_INTERRUPT_STATUS);
+
+		trace_ufshcd_command(dev_name(hba->dev), entry->str, entry->tag,
+				     entry->doorbell, entry->transfer_len, intr,
+				     entry->lba, opcode);
+	}
+}
+#else
+static inline void ufshcd_add_command_trace(struct ufs_hba *hba,
+			struct ufshcd_cmd_log_entry *entry, u8 opcode)
+{
+}
+#endif
+
+#ifdef CONFIG_SCSI_UFSHCD_CMD_LOGGING
+static void ufshcd_cmd_log_init(struct ufs_hba *hba)
+{
+	/* Allocate log entries */
+	if (!hba->cmd_log.entries) {
+		hba->cmd_log.entries = kzalloc(UFSHCD_MAX_CMD_LOGGING *
+			sizeof(struct ufshcd_cmd_log_entry), GFP_KERNEL);
+		if (!hba->cmd_log.entries)
+			return;
+		dev_dbg(hba->dev, "%s: cmd_log.entries initialized\n",
+				__func__);
+	}
+}
+
+static void __ufshcd_cmd_log(struct ufs_hba *hba, char *str, char *cmd_type,
+			     unsigned int tag, u8 cmd_id, u8 idn, u8 lun,
+			     sector_t lba, int transfer_len, u8 opcode)
+{
+	struct ufshcd_cmd_log_entry *entry;
+
+	if (!hba->cmd_log.entries)
+		return;
+
+	entry = &hba->cmd_log.entries[hba->cmd_log.pos];
+	entry->lun = lun;
+	entry->str = str;
+	entry->cmd_type = cmd_type;
+	entry->cmd_id = cmd_id;
+	entry->lba = lba;
+	entry->transfer_len = transfer_len;
+	entry->idn = idn;
+	entry->doorbell = ufshcd_readl(hba, REG_UTP_TRANSFER_REQ_DOOR_BELL);
+	entry->tag = tag;
+	entry->tstamp = ktime_get();
+	entry->outstanding_reqs = hba->outstanding_reqs;
+	entry->seq_num = hba->cmd_log.seq_num;
+	hba->cmd_log.seq_num++;
+	hba->cmd_log.pos =
+			(hba->cmd_log.pos + 1) % UFSHCD_MAX_CMD_LOGGING;
+
+	ufshcd_add_command_trace(hba, entry, opcode);
+}
+
+static void ufshcd_cmd_log(struct ufs_hba *hba, char *str, char *cmd_type,
+	unsigned int tag, u8 cmd_id, u8 idn)
+{
+	__ufshcd_cmd_log(hba, str, cmd_type, tag, cmd_id, idn,
+			 0xff, (sector_t)-1, -1, -1);
+}
+
+static void ufshcd_dme_cmd_log(struct ufs_hba *hba, char *str, u8 cmd_id)
+{
+	ufshcd_cmd_log(hba, str, "dme", 0xff, cmd_id, 0xff);
+}
+
+static void ufshcd_print_cmd_log(struct ufs_hba *hba)
+{
+	int i;
+	int pos;
+	struct ufshcd_cmd_log_entry *p;
+
+	if (!hba->cmd_log.entries)
+		return;
+
+	pos = hba->cmd_log.pos;
+	for (i = 0; i < UFSHCD_MAX_CMD_LOGGING; i++) {
+		p = &hba->cmd_log.entries[pos];
+		pos = (pos + 1) % UFSHCD_MAX_CMD_LOGGING;
+
+		if (ktime_to_us(p->tstamp)) {
+			pr_err("%s: %s: seq_no=%u lun=0x%x cmd_id=0x%02x lba=0x%llx txfer_len=%d tag=%u, doorbell=0x%x outstanding=0x%x idn=%d time=%lld us\n",
+				p->cmd_type, p->str, p->seq_num,
+				p->lun, p->cmd_id, (unsigned long long)p->lba,
+				p->transfer_len, p->tag, p->doorbell,
+				p->outstanding_reqs, p->idn,
+				ktime_to_us(p->tstamp));
+				usleep_range(1000, 1100);
+		}
+	}
+}
+#else
+static void ufshcd_cmd_log_init(struct ufs_hba *hba)
+{
+}
+
+static void __ufshcd_cmd_log(struct ufs_hba *hba, char *str, char *cmd_type,
+			     unsigned int tag, u8 cmd_id, u8 idn, u8 lun,
+			     sector_t lba, int transfer_len, u8 opcode)
+{
+	struct ufshcd_cmd_log_entry entry;
+
+	entry.str = str;
+	entry.lba = lba;
+	entry.transfer_len = transfer_len;
+	entry.doorbell = ufshcd_readl(hba, REG_UTP_TRANSFER_REQ_DOOR_BELL);
+	entry.tag = tag;
+
+	ufshcd_add_command_trace(hba, &entry, opcode);
+}
+
+static void ufshcd_dme_cmd_log(struct ufs_hba *hba, char *str, u8 cmd_id)
+{
+}
+
+static void ufshcd_print_cmd_log(struct ufs_hba *hba)
+{
+}
+#endif
+
+#ifdef CONFIG_TRACEPOINTS
+static inline void ufshcd_cond_add_cmd_trace(struct ufs_hba *hba,
+					unsigned int tag, const char *str)
+{
 	struct ufshcd_lrb *lrbp;
+	char *cmd_type = NULL;
+	u8 opcode = 0;
+	u8 cmd_id = 0, idn = 0;
+	sector_t lba = -1;
 	int transfer_len = -1;
 
 	lrbp = &hba->lrb[tag];
@@ -541,23 +670,28 @@ static void ufshcd_add_command_trace(struct ufs_hba *hba,
 			 */
 			if (lrbp->cmd->request && lrbp->cmd->request->bio)
 				lba =
-				  lrbp->cmd->request->bio->bi_iter.bi_sector;
+				lrbp->cmd->request->bio->bi_iter.bi_sector;
 			transfer_len = be32_to_cpu(
 				lrbp->ucd_req_ptr->sc.exp_data_transfer_len);
 		}
 	}
 
-	intr = ufshcd_readl(hba, REG_INTERRUPT_STATUS);
-	doorbell = ufshcd_readl(hba, REG_UTP_TRANSFER_REQ_DOOR_BELL);
-	trace_ufshcd_command(dev_name(hba->dev), str, tag,
-				doorbell, transfer_len, intr, lba, opcode);
-}
+	if (lrbp->cmd && (lrbp->command_type == UTP_CMD_TYPE_SCSI)) {
+		cmd_type = "scsi";
+		cmd_id = (u8)(*lrbp->cmd->cmnd);
+	} else if (lrbp->command_type == UTP_CMD_TYPE_DEV_MANAGE) {
+		if (hba->dev_cmd.type == DEV_CMD_TYPE_NOP) {
+			cmd_type = "nop";
+			cmd_id = 0;
+		} else if (hba->dev_cmd.type == DEV_CMD_TYPE_QUERY) {
+			cmd_type = "query";
+			cmd_id = hba->dev_cmd.query.request.upiu_req.opcode;
+			idn = hba->dev_cmd.query.request.upiu_req.idn;
+		}
+	}
 
-static inline void ufshcd_cond_add_cmd_trace(struct ufs_hba *hba,
-					unsigned int tag, const char *str)
-{
-	if (trace_ufshcd_command_enabled())
-		ufshcd_add_command_trace(hba, tag, str);
+	__ufshcd_cmd_log(hba, (char *) str, cmd_type, tag, cmd_id, idn,
+			 lrbp->lun, lba, transfer_len, opcode);
 }
 #else
 static inline void ufshcd_cond_add_cmd_trace(struct ufs_hba *hba,
@@ -1908,6 +2042,22 @@ out:
 	return;
 }
 
+static void __ufshcd_set_auto_hibern8_timer(struct ufs_hba *hba,
+					    unsigned long delay_ms)
+{
+	pm_runtime_get_sync(hba->dev);
+	ufshcd_hold_all(hba);
+	ufshcd_scsi_block_requests(hba);
+	down_write(&hba->lock);
+	/* wait for all the outstanding requests to finish */
+	ufshcd_wait_for_doorbell_clr(hba, U64_MAX);
+	ufshcd_set_auto_hibern8_timer(hba, delay_ms);
+	up_write(&hba->lock);
+	ufshcd_scsi_unblock_requests(hba);
+	ufshcd_release_all(hba);
+	pm_runtime_put_sync(hba->dev);
+}
+
 static void ufshcd_hibern8_exit_work(struct work_struct *work)
 {
 	int ret;
@@ -1959,19 +2109,32 @@ static ssize_t ufshcd_hibern8_on_idle_delay_store(struct device *dev,
 {
 	struct ufs_hba *hba = dev_get_drvdata(dev);
 	unsigned long flags, value;
+	bool change = true;
 
 	if (kstrtoul(buf, 0, &value))
 		return -EINVAL;
 
 	spin_lock_irqsave(hba->host->host_lock, flags);
+	if (hba->hibern8_on_idle.delay_ms == value)
+		change = false;
+
+	if (value >= hba->clk_gating.delay_ms_pwr_save ||
+	    value >= hba->clk_gating.delay_ms_perf) {
+		dev_err(hba->dev, "hibern8_on_idle_delay (%lu) can not be >= to clkgate_delay_ms_pwr_save (%lu) and clkgate_delay_ms_perf (%lu)\n",
+			value, hba->clk_gating.delay_ms_pwr_save,
+			hba->clk_gating.delay_ms_perf);
+		spin_unlock_irqrestore(hba->host->host_lock, flags);
+		return -EINVAL;
+	}
+
 	hba->hibern8_on_idle.delay_ms = value;
 	spin_unlock_irqrestore(hba->host->host_lock, flags);
 
 	/* Update auto hibern8 timer value if supported */
-	if (ufshcd_is_auto_hibern8_supported(hba) &&
+	if (change && ufshcd_is_auto_hibern8_supported(hba) &&
 	    hba->hibern8_on_idle.is_enabled)
-		ufshcd_set_auto_hibern8_timer(hba,
-					      hba->hibern8_on_idle.delay_ms);
+		__ufshcd_set_auto_hibern8_timer(hba,
+						hba->hibern8_on_idle.delay_ms);
 
 	return count;
 }
@@ -2001,7 +2164,7 @@ static ssize_t ufshcd_hibern8_on_idle_enable_store(struct device *dev,
 
 	/* Update auto hibern8 timer value if supported */
 	if (ufshcd_is_auto_hibern8_supported(hba)) {
-		ufshcd_set_auto_hibern8_timer(hba,
+		__ufshcd_set_auto_hibern8_timer(hba,
 			value ? hba->hibern8_on_idle.delay_ms : value);
 		goto update;
 	}
@@ -2273,6 +2436,7 @@ ufshcd_dispatch_uic_cmd(struct ufs_hba *hba, struct uic_command *uic_cmd)
 
 	hba->active_uic_cmd = uic_cmd;
 
+	ufshcd_dme_cmd_log(hba, "send", hba->active_uic_cmd->command);
 	/* Write Args */
 	ufshcd_writel(hba, uic_cmd->argument1, REG_UIC_COMMAND_ARG_1);
 	ufshcd_writel(hba, uic_cmd->argument2, REG_UIC_COMMAND_ARG_2);
@@ -2305,6 +2469,8 @@ ufshcd_wait_for_uic_cmd(struct ufs_hba *hba, struct uic_command *uic_cmd)
 
 	if (ret)
 		ufsdbg_set_err_state(hba);
+
+	ufshcd_dme_cmd_log(hba, "cmp1", hba->active_uic_cmd->command);
 
 	spin_lock_irqsave(hba->host->host_lock, flags);
 	hba->active_uic_cmd = NULL;
@@ -3152,8 +3318,10 @@ static int ufshcd_exec_dev_cmd(struct ufs_hba *hba,
 	/*
 	 * May get invoked from shutdown and IOCTL contexts.
 	 * In shutdown context, it comes in with lock acquired.
+	 * In error recovery context, it may come with lock acquired.
 	 */
-	if (!ufshcd_is_shutdown_ongoing(hba))
+
+	if (!ufshcd_is_shutdown_ongoing(hba) && !ufshcd_eh_in_progress(hba))
 		down_read(&hba->lock);
 
 	/*
@@ -3187,7 +3355,7 @@ static int ufshcd_exec_dev_cmd(struct ufs_hba *hba,
 out_put_tag:
 	ufshcd_put_dev_cmd_tag(hba, tag);
 	wake_up(&hba->dev_cmd.tag_wq);
-	if (!ufshcd_is_shutdown_ongoing(hba))
+	if (!ufshcd_is_shutdown_ongoing(hba) && !ufshcd_eh_in_progress(hba))
 		up_read(&hba->lock);
 	return err;
 }
@@ -3624,18 +3792,6 @@ int ufshcd_read_device_desc(struct ufs_hba *hba, u8 *buf, u32 size)
 {
 	return ufshcd_read_desc(hba, QUERY_DESC_IDN_DEVICE, 0, buf, size);
 }
-
-#ifdef CONFIG_ESSENTIAL_UFS
-int ufshcd_read_geometry_desc(struct ufs_hba *hba, u8 *buf, u32 size)
-{
-	return ufshcd_read_desc(hba, QUERY_DESC_IDN_GEOMETRY, 0, buf, size);
-}
-
-int ufshcd_read_device_health_desc(struct ufs_hba *hba, u8 *buf, u32 size)
-{
-	return ufshcd_read_desc(hba, QUERY_DESC_IDN_RFU_2, 0, buf, size);
-}
-#endif
 
 /**
  * ufshcd_read_string_desc - read string descriptor
@@ -4139,12 +4295,15 @@ static int ufshcd_uic_pwr_ctrl(struct ufs_hba *hba, struct uic_command *cmd)
 			cmd->command, status);
 		ret = (status != PWR_OK) ? status : -1;
 	}
+	ufshcd_dme_cmd_log(hba, "cmp2", hba->active_uic_cmd->command);
+
 out:
 	if (ret) {
 		ufsdbg_set_err_state(hba);
 		ufshcd_print_host_state(hba);
 		ufshcd_print_pwr_info(hba);
 		ufshcd_print_host_regs(hba);
+		ufshcd_print_cmd_log(hba);
 	}
 
 	ufshcd_save_tstamp_of_last_dme_cmd(hba);
@@ -5450,7 +5609,7 @@ static void __ufshcd_transfer_req_compl(struct ufs_hba *hba,
 		} else if (lrbp->command_type == UTP_CMD_TYPE_DEV_MANAGE) {
 			if (hba->dev_cmd.complete) {
 				ufshcd_cond_add_cmd_trace(hba, index,
-						"dev_complete");
+						"dcmp");
 				complete(hba->dev_cmd.complete);
 			}
 		}
@@ -5973,6 +6132,7 @@ static void ufshcd_err_handler(struct work_struct *work)
 			ufshcd_print_host_state(hba);
 			ufshcd_print_pwr_info(hba);
 			ufshcd_print_tmrs(hba, hba->outstanding_tasks);
+			ufshcd_print_cmd_log(hba);
 			spin_lock_irqsave(hba->host->host_lock, flags);
 		}
 	}
@@ -6484,6 +6644,7 @@ static int ufshcd_eh_device_reset_handler(struct scsi_cmnd *cmd)
 	hba = shost_priv(host);
 	tag = cmd->request->tag;
 
+	ufshcd_print_cmd_log(hba);
 	lrbp = &hba->lrb[tag];
 	err = ufshcd_issue_tm_cmd(hba, lrbp->lun, 0, UFS_LOGICAL_RESET, &resp);
 	if (err || resp != UPIU_TASK_MANAGEMENT_FUNC_COMPL) {
@@ -9845,6 +10006,8 @@ int ufshcd_init(struct ufs_hba *hba, void __iomem *mmio_base, unsigned int irq)
 	 * ufshcd_probe_hba().
 	 */
 	ufshcd_set_ufs_dev_active(hba);
+
+	ufshcd_cmd_log_init(hba);
 
 	async_schedule(ufshcd_async_scan, hba);
 
