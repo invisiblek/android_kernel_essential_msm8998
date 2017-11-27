@@ -678,6 +678,8 @@ static int android_verity_ctr(struct dm_target *ti, unsigned argc, char **argv)
 	unsigned long long tmpll;
 	u64  uninitialized_var(device_size);
 
+	kernel_restart("dm-verity enforcing");
+
 	if (argc == 1) {
 		/* Use the default keyid */
 		if (default_verity_key_id())
