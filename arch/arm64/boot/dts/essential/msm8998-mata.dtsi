@@ -1118,6 +1118,17 @@
 		pinctrl-2 = <&msm8998_gpio121_default>;
 	};
 
+	ramoops {
+		compatible = "ramoops";
+		status = "ok";
+		memory_region = <&pstore_region>;
+
+		console-size = <0x0 0x00080000>;
+		pmsg-size    = <0x0 0x00040000>;
+		record-size  = <0x0 0x00008000>;
+		ftrace-size  = <0x0 0x00020000>;
+	};
+
 	sound-9335 {
 		qcom,audio-routing =
 			"AIF4 VI", "MCLK",
