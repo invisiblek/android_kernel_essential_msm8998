@@ -29,20 +29,20 @@
 	};
 
 	reserved-memory {
-		essential_nv: essential_nv@A0000000 {
+		alt_ramoops_mem: alt_ramoops_region@a0000000 {
 			compatible = "removed-dma-pool";
 			no-map;
-			reg = <0 0xA0000000 0 0x00800000>;
+			reg = <0 0xa0000000 0 0x00800000>;
 		};
-		pstore_region: pstore_region@A0800000 {
+		ramoops_mem: ramoops_region@a0800000 {
 			compatible = "removed-dma-pool";
 			no-map;
-			reg = <0 0xA0800000 0 0x00200000>;
+			reg = <0 0xa0800000 0 0x00200000>;
 		};
-		essential_mem: essential_mem@A0A00000 {
+		ramoops_meta_mem: ramoops_meta_region@a0a00000 {
 			compatible = "removed-dma-pool";
 			no-map;
-			reg = <0 0xA0A00000 0 0x00200000>;
+			reg = <0 0xa0a00000 0 0x00200000>;
 		};
 	};
 
@@ -1118,11 +1118,23 @@
 		pinctrl-2 = <&msm8998_gpio121_default>;
 	};
 
+	access_ramoops@0 {
+		compatible = "access_ramoops";
+		label = "metadata";
+		memory-region = <&ramoops_meta_mem>;
+	};
+
+	access_ramoops@1 {
+		compatible = "access_ramoops";
+		label = "ramoops";
+		memory-region = <&alt_ramoops_mem>;
+	};
+
 	ramoops {
 		compatible = "ramoops";
 		status = "ok";
-		memory_region = <&pstore_region>;
-
+		memory-region = <&ramoops_mem>;
+		alt-memory-region = <&alt_ramoops_mem>;
 		console-size = <0x0 0x00080000>;
 		pmsg-size    = <0x0 0x00040000>;
 		record-size  = <0x0 0x00008000>;
