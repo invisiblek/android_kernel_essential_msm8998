@@ -35,6 +35,8 @@
 			reg = <0 0xA0000000 0 0x00800000>;
 		};
 		ramoops_mem: ramoops_mem@A0800000 {
+			compatible = "removed-dma-pool";
+			no-map;
 			label = "ramoops_mem";
 			reg = <0 0xA0800000 0 0x00200000>;
 		};
