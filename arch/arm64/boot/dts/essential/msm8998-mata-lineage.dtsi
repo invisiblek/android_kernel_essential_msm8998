@@ -13,7 +13,6 @@
 / {
 	firmware: firmware {
 		android {
-			veritymode = "eio";
 			fstab {
 				vendor {
 					fsmgr_flags = "wait,slotselect";
